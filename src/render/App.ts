@@ -1,21 +1,74 @@
-import * as THREE from 'three';
+import {
+  ACESFilmicToneMapping,
+  Clock,
+  MathUtils,
+  PCFSoftShadowMap,
+  PerspectiveCamera,
+  Scene,
+  TOUCH,
+  Vector3,
+  WebGLRenderer,
+} from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 
+import { DEFAULT_SPEED, type SpeedLevel } from '../simulation/constants.js';
 import { TickScheduler } from '../simulation/TickScheduler.js';
-import type { SpeedLevel } from '../simulation/constants.js';
-import { DEFAULT_SPEED } from '../simulation/constants.js';
 import { World } from '../simulation/World.js';
 
-/** Half the side length of the ground plane, in world units (metres). */
-const GROUND_HALF_SIZE = 60;
-
-/** Camera framing: a slightly tilted god view, as described in SPEC.md 2.9. */
-const CAMERA_START_POSITION = new THREE.Vector3(38, 30, 38);
-const CAMERA_TARGET = new THREE.Vector3(0, 0, 0);
+import { CitizenView } from './CitizenView.js';
+import { Environment } from './Environment.js';
+import { TownView } from './TownView.js';
 
 /**
- * The renderer side of the app: a Three.js scene, a god view camera, and the
- * frame loop that drives the simulation.
+ * The default camera, as a direction rather than a position, so the framing can
+ * react to the shape of the screen.
+ *
+ * Yaw is measured from +Z towards +X. Landscape sits across the line the sun
+ * travels, which keeps dawn and dusk raking across the town instead of flat on
+ * or straight into the lens. Portrait turns the camera along the long axis of
+ * the town, so it stands up the screen rather than across it (SPEC.md 2.9).
+ */
+const LANDSCAPE_VIEW = {
+  yawDegrees: -52,
+  pitchDegrees: 29,
+  fieldOfView: 42,
+  margin: 0.86,
+  lift: 0.07,
+};
+/**
+ * Portrait takes a wider lens. A narrow screen would otherwise push the camera
+ * so far back that the town sits in the haze, small and flat.
+ */
+const PORTRAIT_VIEW = {
+  yawDegrees: -96,
+  pitchDegrees: 50,
+  fieldOfView: 60,
+  margin: 0.92,
+  lift: 0.05,
+};
+
+const CAMERA_TARGET = new Vector3(0, 2, 0);
+
+/**
+ * The box the town lives in, relative to CAMERA_TARGET. It is deliberately
+ * asymmetric: the town sits on the ground, so there is nothing to frame below
+ * it, and the built area is a little smaller than the ground it stands on.
+ * Phase 2 reads this from the real layout instead of stating it here.
+ */
+const TOWN_BOUNDS_MIN = new Vector3(-34, -2, -27);
+const TOWN_BOUNDS_MAX = new Vector3(34, 8, 27);
+
+/** Speeds reachable from the keyboard while there is no UI yet. */
+const SPEED_KEYS: Record<string, SpeedLevel> = {
+  Digit1: 1,
+  Digit2: 5,
+  Digit3: 20,
+  Digit4: 100,
+};
+
+/**
+ * The renderer side of the app: the Three.js scene and the frame loop that
+ * drives the simulation.
  *
  * The simulation never reaches back into here. This class reads the World; the
  * World knows nothing about Three.js (SPEC.md 3.2).
@@ -25,38 +78,51 @@ export class App {
   readonly scheduler: TickScheduler;
 
   private readonly container: HTMLElement;
-  private readonly renderer: THREE.WebGLRenderer;
-  private readonly scene: THREE.Scene;
-  private readonly camera: THREE.PerspectiveCamera;
+  private readonly renderer: WebGLRenderer;
+  private readonly scene = new Scene();
+  private readonly camera: PerspectiveCamera;
   private readonly controls: OrbitControls;
-  private readonly clock = new THREE.Clock();
+  private readonly clock = new Clock();
+
+  private readonly environment: Environment;
+  private readonly townView = new TownView();
+  private readonly citizenView: CitizenView;
 
   private animationFrame = 0;
   private running = false;
+  /** Speed to return to when the viewer unpauses. */
+  private speedBeforePause: SpeedLevel = DEFAULT_SPEED;
 
   constructor(container: HTMLElement, world: World = new World()) {
     this.container = container;
     this.world = world;
     this.scheduler = new TickScheduler(DEFAULT_SPEED);
 
-    this.renderer = new THREE.WebGLRenderer({ antialias: true });
+    this.renderer = new WebGLRenderer({ antialias: true });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.setSize(container.clientWidth, container.clientHeight);
+    this.renderer.shadowMap.enabled = true;
+    this.renderer.shadowMap.type = PCFSoftShadowMap;
+    this.renderer.toneMapping = ACESFilmicToneMapping;
+    this.renderer.toneMappingExposure = 1.15;
     container.appendChild(this.renderer.domElement);
 
-    this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color(0x8fb6d8);
-
-    this.camera = new THREE.PerspectiveCamera(45, this.aspectRatio(), 0.1, GROUND_HALF_SIZE * 10);
-    this.camera.position.copy(CAMERA_START_POSITION);
-    this.camera.lookAt(CAMERA_TARGET);
-
+    this.camera = new PerspectiveCamera(42, this.aspectRatio(), 0.5, 900);
     this.controls = this.createControls();
+    this.environment = new Environment(this.scene);
+    this.frameTown();
+    this.citizenView = new CitizenView(world);
+    this.scene.add(this.townView.root);
+    this.scene.add(this.citizenView.root);
 
-    this.addPlaceholderLighting();
-    this.addGround();
+    // Draw the town in its opening light before the first frame runs.
+    this.environment.update(world.time.minuteOfDay);
+    this.townView.update(world, this.environment.state, 10);
+    this.citizenView.update(10);
 
     window.addEventListener('resize', this.handleResize);
+    window.addEventListener('keydown', this.handleKeyDown);
+    document.addEventListener('visibilitychange', this.handleVisibilityChange);
   }
 
   /** Orbit style camera: drag to rotate, wheel or pinch to zoom, two fingers to pan. */
@@ -65,38 +131,84 @@ export class App {
     controls.target.copy(CAMERA_TARGET);
     controls.enableDamping = true;
     controls.dampingFactor = 0.08;
-    controls.minDistance = 10;
-    controls.maxDistance = GROUND_HALF_SIZE * 2;
+    controls.minDistance = 18;
+    controls.maxDistance = 190;
     // Keep the camera above the horizon so it never looks up from under the ground.
-    controls.maxPolarAngle = Math.PI / 2 - 0.05;
-    controls.touches = {
-      ONE: THREE.TOUCH.ROTATE,
-      TWO: THREE.TOUCH.DOLLY_PAN,
-    };
-    controls.update();
+    controls.maxPolarAngle = Math.PI / 2 - 0.08;
+    controls.touches = { ONE: TOUCH.ROTATE, TWO: TOUCH.DOLLY_PAN };
     return controls;
   }
 
   /**
-   * Neutral light so the empty ground is visible. The day/night lighting that
-   * carries the time-lapse arrives in Phase 1.
+   * Places the camera so the whole town fits, whatever shape the screen is.
+   *
+   * A portrait screen turns the camera almost due east, which lays the long
+   * axis of the town up the screen rather than across it, and then backs off
+   * until every corner of the town is inside the frustum.
    */
-  private addPlaceholderLighting(): void {
-    const sky = new THREE.HemisphereLight(0xbfd8f0, 0x60705c, 1.1);
-    this.scene.add(sky);
+  private frameTown(): void {
+    const portrait = this.aspectRatio() < 1;
+    const view = portrait ? PORTRAIT_VIEW : LANDSCAPE_VIEW;
 
-    const sun = new THREE.DirectionalLight(0xfff2d8, 1.4);
-    sun.position.set(30, 50, 20);
-    this.scene.add(sun);
+    this.camera.fov = view.fieldOfView;
+    this.camera.updateProjectionMatrix();
+
+    const yaw = MathUtils.degToRad(view.yawDegrees);
+    const pitch = MathUtils.degToRad(view.pitchDegrees);
+    const direction = new Vector3(
+      Math.sin(yaw) * Math.cos(pitch),
+      Math.sin(pitch),
+      Math.cos(yaw) * Math.cos(pitch),
+    );
+
+    // The margin is at or under one on purpose: in landscape the outermost
+    // trees sit right on the edge of the frame rather than floating in grass.
+    const distance = this.fitDistance(direction) * view.margin;
+
+    // Aiming a little above the town pushes it down the frame and fills the
+    // space it leaves with sky rather than with empty grass. A portrait screen
+    // has more spare height, so it needs more of this.
+    const visibleHeight = 2 * distance * Math.tan(MathUtils.degToRad(this.camera.fov) / 2);
+    const target = CAMERA_TARGET.clone().setY(CAMERA_TARGET.y + visibleHeight * view.lift);
+
+    this.camera.position.copy(direction).multiplyScalar(distance).add(target);
+    this.controls.target.copy(target);
+    this.controls.update();
+
+    // Keep the haze behind the town whatever distance the framing chose.
+    this.environment.setFogRange(distance * 0.95, distance + 240);
   }
 
-  private addGround(): void {
-    const geometry = new THREE.PlaneGeometry(GROUND_HALF_SIZE * 2, GROUND_HALF_SIZE * 2);
-    const material = new THREE.MeshStandardMaterial({ color: 0x7c9e64, roughness: 1 });
-    const ground = new THREE.Mesh(geometry, material);
-    ground.rotation.x = -Math.PI / 2;
-    ground.name = 'ground';
-    this.scene.add(ground);
+  /**
+   * The closest the camera can sit along `direction` with every corner of the
+   * town still inside the frustum.
+   */
+  private fitDistance(direction: Vector3): number {
+    const forward = direction.clone().negate();
+    const right = new Vector3().crossVectors(forward, new Vector3(0, 1, 0)).normalize();
+    const up = new Vector3().crossVectors(right, forward).normalize();
+
+    const tanVertical = Math.tan(MathUtils.degToRad(this.camera.fov) / 2);
+    const tanHorizontal = tanVertical * this.camera.aspect;
+
+    const corner = new Vector3();
+    let needed = 0;
+
+    for (const x of [TOWN_BOUNDS_MIN.x, TOWN_BOUNDS_MAX.x]) {
+      for (const y of [TOWN_BOUNDS_MIN.y, TOWN_BOUNDS_MAX.y]) {
+        for (const z of [TOWN_BOUNDS_MIN.z, TOWN_BOUNDS_MAX.z]) {
+          corner.set(x, y, z);
+          const depth = corner.dot(direction);
+          needed = Math.max(
+            needed,
+            depth + Math.abs(corner.dot(right)) / tanHorizontal,
+            depth + Math.abs(corner.dot(up)) / tanVertical,
+          );
+        }
+      }
+    }
+
+    return needed;
   }
 
   private aspectRatio(): number {
@@ -104,8 +216,19 @@ export class App {
     return this.container.clientWidth / height;
   }
 
+  getSpeed(): SpeedLevel {
+    return this.scheduler.getSpeed();
+  }
+
   setSpeed(speed: SpeedLevel): void {
+    if (speed !== 0) {
+      this.speedBeforePause = speed;
+    }
     this.scheduler.setSpeed(speed);
+  }
+
+  togglePause(): void {
+    this.setSpeed(this.scheduler.isPaused ? this.speedBeforePause : 0);
   }
 
   start(): void {
@@ -128,25 +251,63 @@ export class App {
     this.animationFrame = requestAnimationFrame(this.frame);
 
     const deltaSeconds = this.clock.getDelta();
-    const ticks = this.scheduler.ticksForFrame(deltaSeconds);
-    this.world.tickMany(ticks);
+    this.world.tickMany(this.scheduler.ticksForFrame(deltaSeconds));
+
+    this.environment.update(this.world.time.minuteOfDay);
+    this.townView.update(this.world, this.environment.state, deltaSeconds);
+    this.citizenView.update(deltaSeconds);
 
     this.controls.update();
     this.renderer.render(this.scene, this.camera);
   };
 
   private readonly handleResize = (): void => {
-    const width = this.container.clientWidth;
-    const height = this.container.clientHeight;
+    const wasPortrait = this.camera.aspect < 1;
     this.camera.aspect = this.aspectRatio();
     this.camera.updateProjectionMatrix();
+    // Turning the phone swaps the framing; a plain window resize leaves the
+    // viewer's own camera alone.
+    if (wasPortrait !== this.camera.aspect < 1) {
+      this.frameTown();
+    }
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    this.renderer.setSize(width, height);
+    this.renderer.setSize(this.container.clientWidth, this.container.clientHeight);
+  };
+
+  /**
+   * Temporary speed keys, in place until the real controls arrive in Phase 6:
+   * 1, 2, 3 and 4 for the four speeds, space to pause.
+   */
+  private readonly handleKeyDown = (event: KeyboardEvent): void => {
+    if (event.code === 'Space') {
+      event.preventDefault();
+      this.togglePause();
+      return;
+    }
+    const speed = SPEED_KEYS[event.code];
+    if (speed !== undefined) {
+      this.setSpeed(speed);
+    }
+  };
+
+  /**
+   * Pauses while the page is hidden and stays paused on the way back, rather
+   * than catching up on the time that passed (SPEC.md 2.13).
+   */
+  private readonly handleVisibilityChange = (): void => {
+    if (document.visibilityState === 'hidden') {
+      this.setSpeed(0);
+    } else {
+      this.scheduler.reset();
+      this.clock.getDelta();
+    }
   };
 
   dispose(): void {
     this.stop();
     window.removeEventListener('resize', this.handleResize);
+    window.removeEventListener('keydown', this.handleKeyDown);
+    document.removeEventListener('visibilitychange', this.handleVisibilityChange);
     this.controls.dispose();
     this.renderer.dispose();
     this.renderer.domElement.remove();

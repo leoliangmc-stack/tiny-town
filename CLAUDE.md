@@ -37,6 +37,11 @@ src/
 tests/            Vitest, including the headless multi-day run
 ```
 
+## Temporary controls
+
+Until the real UI arrives in Phase 6: `1`, `2`, `3`, `4` set the speed to 1x, 5x, 20x and
+100x, and space pauses. The running app is exposed as `window.tinyTown` in dev builds.
+
 ## Commands
 
 ```bash
