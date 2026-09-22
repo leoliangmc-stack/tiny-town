@@ -213,16 +213,26 @@ The town sits in a place, not on a green table (SPEC 2.14).
   the colour of the hour: gold at dawn, blue at noon, orange at dusk, a moon path at
   night. Never a mirror.
 - **Sky.** By day a real sun with a soft halo and slow, soft-edged clouds that drift; at
-  dawn and dusk the clouds take the light. By night a field of stars, a faint band of Milky
-  Way, and a moon with a halo. Every colour in the sky comes from the time palettes in
-  `render/palettes.ts`; the sky never argues with the ground.
+  dawn and dusk the clouds take the light. Every colour in the sky comes from the time
+  palettes in `render/palettes.ts`; the sky never argues with the ground.
+- **The night sky is a hero.** Think of Lake Tekapo, the dark sky reserve: a sky so full
+  of stars that it has depth. A few bright stars lead, thousands of faint ones carry the
+  ground behind them, and the eye can tell their colours apart: blue-white, white, yellow,
+  orange-red, in the proportions real stars come in. The bright ones have a soft bloom and
+  a hint of a spike. The Milky Way is a broad, bright, structured band, with a dense core,
+  a dark dust lane splitting it and soft ragged edges, seen at a glance rather than found.
+  The moon is a crescent or a half: a clear face with maria, a soft halo, and no skyglow
+  that could wash the stars out. Stars and moon together, "the stars gathered round the
+  moon".
 - **Distance.** Hills and a forest around the town, mountains beyond, all fading into the
   sky colour with distance. Enough to fill the horizon, never enough to compete with the
   town.
-- **Restraint.** The town and its windows are the subject. Clouds, sea and stars are kept
-  quiet; the Milky Way in particular is a suggestion, not a spectacle.
-- **Cost.** Sky, clouds and sea are shaders on a few large meshes; distant trees are
-  instanced. Their motion is render-side only.
+- **The floor under the spectacle.** By day the town and its windows are the subject and
+  clouds and sea are kept quiet. By night the sky may be spectacular, but the windows,
+  street lamps and car lights must still be the brightest, warmest things in the picture.
+  If a starfield ever makes a lit window look dim, the starfield is wrong.
+- **Cost.** Sky, clouds, stars, Milky Way, moon and sea are shaders on a few large
+  meshes, never particles; distant trees are instanced. Their motion is render-side only.
 
 ## 21. Priorities
 
