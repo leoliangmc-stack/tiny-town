@@ -166,6 +166,26 @@ Companion to `SPEC.md` (the single source of truth for requirements) and `DESIGN
 - Determinism test still passes.
 - Visual at 20×: cars visibly commute morning and evening.
 
+## Phase 4.6 — Environment and sky
+
+**Goal.** Put the town in a place (SPEC 2.14, DESIGN.md §20): sea and beach on the north side, a real sky by day and by night, hills and forest around, and a little traffic after dark.
+
+**Scope.**
+
+- Sea and sand: a curved shoreline north of the town, a sand strip, a water shader with a slow swell and a reflection band under the sun or moon, coloured from the palettes.
+- Sky: the dome shader gains a sun disc with a halo, drifting clouds tinted by the hour, stars, a faint Milky Way and a moon with a halo; all driven by the time palettes and the sun position already in `Environment.ts`.
+- Distance: rings of hills and mountains as a few large meshes, a forest of instanced trees between the town and the hills, all under the existing fog so distance reads as haze.
+- Night traffic: one or two car owners go out to the cafe in the evening, so headlights cross the dark streets.
+- Palettes gain sea, cloud and star values per stop.
+
+**Out of scope.** Weather, buildings, UI. Anything animated here (clouds, swell) is render-side only and never touches the simulation or the state hash.
+
+**Acceptance.**
+
+- Draw calls and p95 frame time reported before and after; the environment costs single-digit draw calls.
+- Screenshots at the four moments and both framings, plus one of the sea and beach, one of clouds by day, and one of the night sky, judged by the author against DESIGN.md.
+- All tests pass; determinism untouched.
+
 ## Phase 5 — Weather and behavioural effects
 
 **Goal.** Weather that changes what citizens do, not just how the town looks.

@@ -204,7 +204,27 @@ and wet road.
 4. **Night** — quiet streets, lit houses, car lights crossing the town
 5. **Rain** — umbrellas out, wet streets, more cars, the park emptying
 
-## 20. Priorities
+## 20. Environment and sky
+
+The town sits in a place, not on a green table (SPEC 2.14).
+
+- **Sea and beach** to the north. A curved shoreline that follows the town rather than a
+  straight edge; a strip of pale sand; water with a slow swell and a reflection that takes
+  the colour of the hour: gold at dawn, blue at noon, orange at dusk, a moon path at
+  night. Never a mirror.
+- **Sky.** By day a real sun with a soft halo and slow, soft-edged clouds that drift; at
+  dawn and dusk the clouds take the light. By night a field of stars, a faint band of Milky
+  Way, and a moon with a halo. Every colour in the sky comes from the time palettes in
+  `render/palettes.ts`; the sky never argues with the ground.
+- **Distance.** Hills and a forest around the town, mountains beyond, all fading into the
+  sky colour with distance. Enough to fill the horizon, never enough to compete with the
+  town.
+- **Restraint.** The town and its windows are the subject. Clouds, sea and stars are kept
+  quiet; the Milky Way in particular is a suggestion, not a spectacle.
+- **Cost.** Sky, clouds and sea are shaders on a few large meshes; distant trees are
+  instanced. Their motion is render-side only.
+
+## 21. Priorities
 
 1. Overall town composition
 2. Consistent building style
