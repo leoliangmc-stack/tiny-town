@@ -126,6 +126,26 @@ Companion to `SPEC.md` (the single source of truth for requirements) and `DESIGN
 - Determinism test: run the same seeded day at 1× and at 100× and compare a hash of the full world state at 23:59. Must match.
 - Visual: town is never empty during daytime; night shows staggered lights-out.
 
+## Phase 3.5 — Draw call refactor
+
+**Goal.** The same picture from a fraction of the draw calls. With sixty citizens the desktop frame sat at a p95 of 18 ms on an M4 because the town was 4,695 draw calls: every window, lamp and tree its own mesh. A mid-range phone will not survive that, and Phase 4 adds cars on top. Bring it under 200 before anything else is built.
+
+**Scope.**
+
+- Repeated objects become `InstancedMesh`, grouped by geometry and material: window frames, panes, sills and glows; lamp poles, heads, bulbs, haloes and light pools; tree trunks, crowns and cones; shrubs; flower beds and blooms; roof trim, chimneys, doors and steps; kerbs, road slabs, junction patches, zone furniture; whatever else the profile shows.
+- Lit windows keep per-window control: brightness goes through `instanceColor` (or a per-instance attribute) into the emissive term, so one window can be on while its neighbour is off.
+- Buildings themselves (walls, roofs) stay individual meshes; there are only about forty.
+- A small batching helper so `TownView` stays readable: collect placements, build the instanced meshes once.
+
+**Out of scope.** Any new feature or visual element, cars, weather, UI. Nothing about the simulation changes.
+
+**Acceptance.**
+
+- Screenshots at the same four moments and both framings before and after are indistinguishable to the eye. Any place where instancing would cost an effect is raised, not decided.
+- Per-window lighting, lamps at dusk, and per-house deterministic variation all still work.
+- All tests pass; the determinism test is untouched.
+- Desktop draw calls under 200; before/after table of draw calls, triangles and p95 frame time.
+
 ## Phase 4 — Vehicles
 
 **Goal.** Roads look alive. Some citizens commute by car.
