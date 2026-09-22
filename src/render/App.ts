@@ -15,7 +15,10 @@ import { DEFAULT_SPEED, type SpeedLevel } from '../simulation/constants.js';
 import { TickScheduler } from '../simulation/TickScheduler.js';
 import { World } from '../simulation/World.js';
 
+import { townBounds } from '../world/Town.js';
+
 import { CitizenView } from './CitizenView.js';
+import { DebugView } from './DebugView.js';
 import { Environment } from './Environment.js';
 import { TownView } from './TownView.js';
 
@@ -29,34 +32,33 @@ import { TownView } from './TownView.js';
  * the town, so it stands up the screen rather than across it (SPEC.md 2.9).
  */
 const LANDSCAPE_VIEW = {
-  yawDegrees: -52,
-  pitchDegrees: 29,
+  yawDegrees: -25,
+  pitchDegrees: 30,
   fieldOfView: 42,
-  margin: 0.86,
-  lift: 0.07,
+  margin: 0.97,
+  lift: 0.03,
 };
 /**
  * Portrait takes a wider lens. A narrow screen would otherwise push the camera
  * so far back that the town sits in the haze, small and flat.
  */
 const PORTRAIT_VIEW = {
-  yawDegrees: -96,
-  pitchDegrees: 50,
+  yawDegrees: -100,
+  pitchDegrees: 48,
   fieldOfView: 60,
-  margin: 0.92,
-  lift: 0.05,
+  margin: 0.78,
+  lift: 0.015,
 };
 
 const CAMERA_TARGET = new Vector3(0, 2, 0);
 
-/**
- * The box the town lives in, relative to CAMERA_TARGET. It is deliberately
- * asymmetric: the town sits on the ground, so there is nothing to frame below
- * it, and the built area is a little smaller than the ground it stands on.
- * Phase 2 reads this from the real layout instead of stating it here.
- */
-const TOWN_BOUNDS_MIN = new Vector3(-34, -2, -27);
-const TOWN_BOUNDS_MAX = new Vector3(34, 8, 27);
+/** Tallest thing in the town, for the camera to frame over. */
+const TOWN_HEIGHT = 12;
+
+/** `?debug` draws the navigation graphs and the routes over the town. */
+function debugRequested(): boolean {
+  return new URLSearchParams(window.location.search).has('debug');
+}
 
 /** Speeds reachable from the keyboard while there is no UI yet. */
 const SPEED_KEYS: Record<string, SpeedLevel> = {
@@ -87,6 +89,7 @@ export class App {
   private readonly environment: Environment;
   private readonly townView = new TownView();
   private readonly citizenView: CitizenView;
+  private readonly debugView: DebugView | undefined;
 
   private animationFrame = 0;
   private running = false;
@@ -115,6 +118,11 @@ export class App {
     this.scene.add(this.townView.root);
     this.scene.add(this.citizenView.root);
 
+    if (debugRequested()) {
+      this.debugView = new DebugView(world);
+      this.scene.add(this.debugView.root);
+    }
+
     // Draw the town in its opening light before the first frame runs.
     this.environment.update(world.time.minuteOfDay);
     this.townView.update(world, this.environment.state, 10);
@@ -131,8 +139,10 @@ export class App {
     controls.target.copy(CAMERA_TARGET);
     controls.enableDamping = true;
     controls.dampingFactor = 0.08;
+    // The real limits are set from the framing distance once the town has been
+    // measured; these are placeholders until then.
     controls.minDistance = 18;
-    controls.maxDistance = 190;
+    controls.maxDistance = 400;
     // Keep the camera above the horizon so it never looks up from under the ground.
     controls.maxPolarAngle = Math.PI / 2 - 0.08;
     controls.touches = { ONE: TOUCH.ROTATE, TWO: TOUCH.DOLLY_PAN };
@@ -163,16 +173,26 @@ export class App {
 
     // The margin is at or under one on purpose: in landscape the outermost
     // trees sit right on the edge of the frame rather than floating in grass.
-    const distance = this.fitDistance(direction) * view.margin;
-
     // Aiming a little above the town pushes it down the frame and fills the
     // space it leaves with sky rather than with empty grass. A portrait screen
     // has more spare height, so it needs more of this.
-    const visibleHeight = 2 * distance * Math.tan(MathUtils.degToRad(this.camera.fov) / 2);
-    const target = CAMERA_TARGET.clone().setY(CAMERA_TARGET.y + visibleHeight * view.lift);
+    //
+    // Raising the aim also moves the town within the frame, so the fit is done
+    // twice: once to find out how far up to aim, then again with the town in
+    // its new place, or the far corners would fall outside the picture.
+    const firstPass = this.fitDistance(direction, 0) * view.margin;
+    const lift = 2 * firstPass * Math.tan(MathUtils.degToRad(this.camera.fov) / 2) * view.lift;
+    const distance = this.fitDistance(direction, lift) * view.margin;
 
+    const target = CAMERA_TARGET.clone().setY(CAMERA_TARGET.y + lift);
     this.camera.position.copy(direction).multiplyScalar(distance).add(target);
     this.controls.target.copy(target);
+
+    // Let the viewer come in close and pull back a little further than the
+    // default, but no further. A limit left over from a smaller town would
+    // quietly drag the camera in and crop the framing.
+    this.controls.minDistance = 25;
+    this.controls.maxDistance = distance * 1.6;
     this.controls.update();
 
     // Keep the haze behind the town whatever distance the framing chose.
@@ -181,9 +201,10 @@ export class App {
 
   /**
    * The closest the camera can sit along `direction` with every corner of the
-   * town still inside the frustum.
+   * town still inside the frustum, when the camera aims `lift` metres above
+   * the town centre.
    */
-  private fitDistance(direction: Vector3): number {
+  private fitDistance(direction: Vector3, lift: number): number {
     const forward = direction.clone().negate();
     const right = new Vector3().crossVectors(forward, new Vector3(0, 1, 0)).normalize();
     const up = new Vector3().crossVectors(right, forward).normalize();
@@ -194,9 +215,11 @@ export class App {
     const corner = new Vector3();
     let needed = 0;
 
-    for (const x of [TOWN_BOUNDS_MIN.x, TOWN_BOUNDS_MAX.x]) {
-      for (const y of [TOWN_BOUNDS_MIN.y, TOWN_BOUNDS_MAX.y]) {
-        for (const z of [TOWN_BOUNDS_MIN.z, TOWN_BOUNDS_MAX.z]) {
+    const bounds = townBounds();
+
+    for (const x of [bounds.minX, bounds.maxX]) {
+      for (const y of [-CAMERA_TARGET.y - lift, TOWN_HEIGHT - CAMERA_TARGET.y - lift]) {
+        for (const z of [bounds.minZ, bounds.maxZ]) {
           corner.set(x, y, z);
           const depth = corner.dot(direction);
           needed = Math.max(
@@ -257,6 +280,8 @@ export class App {
     this.townView.update(this.world, this.environment.state, deltaSeconds);
     this.citizenView.update(deltaSeconds);
 
+    this.debugView?.update(this.world);
+
     this.controls.update();
     this.renderer.render(this.scene, this.camera);
   };
@@ -308,6 +333,7 @@ export class App {
     window.removeEventListener('resize', this.handleResize);
     window.removeEventListener('keydown', this.handleKeyDown);
     document.removeEventListener('visibilitychange', this.handleVisibilityChange);
+    this.debugView?.dispose();
     this.controls.dispose();
     this.renderer.dispose();
     this.renderer.domElement.remove();

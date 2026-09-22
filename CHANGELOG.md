@@ -1,5 +1,32 @@
 # Changelog
 
+## Phase 2 — Full map and navigation graph
+
+- The whole town, as data in `world/Town.ts`: a high street with two residential lanes
+  and four cross streets, 20 houses, school, cafe, supermarket, bakery, office, park,
+  car park, pavements, trees, street lamps and signs. About 160 by 112 metres.
+- Outdoor activity zones for every public building, each a rectangle with spawn points:
+  cafe terrace, schoolyard with a climbing frame, supermarket forecourt, bakery front,
+  office forecourt, and the park lawn with a path and benches. Phase 3 sends citizens
+  to them.
+- `simulation/Navigation.ts`: a pavement graph (303 nodes) and a road graph (105 nodes),
+  both generated from the street data so the map and the graphs cannot drift apart.
+  Pavements run down both sides of every street and the four corners of each junction
+  are joined, which is both the way round the corner and the two crossings. Every
+  building has a door node on the pavement; the car park has a node per space on the
+  road graph. Routes are A* and are cached per citizen, recomputed only when the
+  destination changes.
+- Camera framing is now computed from the real layout bounds and the screen shape, in
+  two passes so aiming above the town never crops it. Portrait takes a wider lens and
+  looks along the long axis of the town.
+- `?debug` draws both graphs and the citizens' current routes over the town.
+- Placeholder lighting in `simulation/HouseholdLights.ts` for the houses that have no
+  resident yet, so the town does not read as abandoned at night. Phase 3 deletes it.
+- Tests: every pair of building entrances is reachable on the pavement graph, every
+  parking space is reachable on the road graph, no two buildings overlap, nothing sits
+  on a road, every public building has a zone in front of it, and over 30 game days
+  every citizen stays on a route that lies on the graph.
+
 ## Phase 1 — Time-lapse vertical slice
 
 - Small handcrafted layout in `world/Town.ts`: five houses and a cafe around one road

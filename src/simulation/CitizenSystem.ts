@@ -3,11 +3,11 @@ import type { Citizen } from '../entities/Citizen.js';
 import { distance } from '../entities/geometry.js';
 import type { Point } from '../entities/geometry.js';
 import { createCitizen, RESIDENTS, SCHEDULE_JITTER_MINUTES } from '../world/Population.js';
-import { CAFE_ID, CAFE_TERRACE_SPOTS, getBuilding } from '../world/Town.js';
+import { CAFE_ID, getBuilding, getZone } from '../world/Town.js';
 
 import { GAME_MINUTES_PER_TICK } from './constants.js';
+import { buildSidewalkGraph, entranceNodeId, NavGraph } from './Navigation.js';
 import { Rng } from './Rng.js';
-import { SidewalkLoop } from './Routes.js';
 
 /**
  * How close to the next path point counts as having reached it. It only guards
@@ -26,29 +26,36 @@ const ARRIVAL_TOLERANCE = 1e-6;
 export class CitizenSystem {
   readonly citizens: Citizen[] = [];
 
-  private readonly loop = new SidewalkLoop();
+  readonly sidewalks: NavGraph;
   private readonly seed: number | string;
 
   /**
-   * Routes are built once and reused, since Phase 1 has exactly two
-   * destinations per citizen (SPEC.md 3.2: cache paths, recompute only when the
-   * destination changes).
+   * Paths are worked out once per destination and kept (SPEC.md 3.2, rule 4:
+   * cache paths, recompute only when the destination changes). Phase 1's two
+   * destinations per citizen are still the only two, so both are built up
+   * front and then reused every day.
    */
   private readonly routeToCafe = new Map<string, Point[]>();
   private readonly routeToHome = new Map<string, Point[]>();
 
   constructor(seed: number | string) {
     this.seed = seed;
+    this.sidewalks = buildSidewalkGraph();
+
+    const terrace = getZone('cafe-terrace');
 
     RESIDENTS.forEach((template, index) => {
       const homeDoor = doorPosition(getBuilding(template.homeId));
       const citizen = createCitizen(template, homeDoor);
       this.citizens.push(citizen);
 
-      // Each citizen has their own spot on the terrace, so nobody stands in
-      // the same place as anybody else.
-      const terraceSpot = CAFE_TERRACE_SPOTS[index % CAFE_TERRACE_SPOTS.length];
-      const toCafe = this.loop.route(homeDoor, terraceSpot);
+      // Each citizen has their own spot on the terrace, so nobody stands where
+      // somebody else is already standing.
+      const spot = terrace.spawnPoints[index % terrace.spawnPoints.length];
+      const toCafe = [
+        ...this.sidewalks.findPath(entranceNodeId(template.homeId), entranceNodeId(CAFE_ID)),
+        { ...spot },
+      ];
       this.routeToCafe.set(citizen.id, toCafe);
       this.routeToHome.set(citizen.id, [...toCafe].reverse());
     });
@@ -80,7 +87,7 @@ export class CitizenSystem {
 
   /** Where the citizen faces while standing at the cafe: back towards the street. */
   private terraceHeading(index: number): number {
-    return Math.PI + (index - CAFE_TERRACE_SPOTS.length / 2) * 0.28;
+    return Math.PI + (index - this.citizens.length / 2) * 0.28;
   }
 
   tick(day: number, minuteOfDay: number): void {

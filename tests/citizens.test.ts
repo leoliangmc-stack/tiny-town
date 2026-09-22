@@ -8,7 +8,8 @@ import {
   TICKS_PER_GAME_MINUTE,
 } from '../src/simulation/constants.js';
 import { World } from '../src/simulation/World.js';
-import { BUILDINGS } from '../src/world/Town.js';
+import { buildSidewalkGraph } from '../src/simulation/Navigation.js';
+import { BUILDINGS, OUTDOOR_ZONES, townBounds } from '../src/world/Town.js';
 import { RESIDENTS } from '../src/world/Population.js';
 
 const DAYS_TO_RUN = 30;
@@ -35,6 +36,8 @@ describe('citizens over 30 game days', () => {
   const lastPosition = new Map<string, Point>();
   const stillForMinutes = new Map<string, number>();
   const cafeVisitsPerDay = new Map<string, Set<number>>();
+  const lastRoute = new Map<string, Point[]>();
+  const lastRouteOf = (id: string): Point[] => lastRoute.get(id) ?? [];
 
   let maxStillMinutes = 0;
   let maxDistanceOffPath = 0;
@@ -70,6 +73,7 @@ describe('citizens over 30 game days', () => {
           maxDistanceOffPath,
           distanceToPath(citizen.position, citizen.path),
         );
+        lastRoute.set(citizen.id, citizen.path);
       }
       maxDistanceFromCentre = Math.max(
         maxDistanceFromCentre,
@@ -87,10 +91,52 @@ describe('citizens over 30 game days', () => {
   });
 
   it('never lets a citizen leave the town', () => {
-    expect(maxDistanceFromCentre).toBeLessThan(50);
+    const bounds = townBounds();
+    const reach = Math.max(
+      Math.hypot(bounds.minX, bounds.minZ),
+      Math.hypot(bounds.maxX, bounds.maxZ),
+    );
+
+    expect(maxDistanceFromCentre).toBeLessThan(reach);
     for (const citizen of world.citizens) {
       expect(Number.isFinite(citizen.position.x)).toBe(true);
       expect(Number.isFinite(citizen.position.z)).toBe(true);
+    }
+  });
+
+  it('routes every citizen along the pavement network', () => {
+    // Positions are checked against the route above; this checks the routes
+    // themselves sit on the graph, apart from the two ends, which are a door
+    // and a spot inside an outdoor zone.
+    const graph = buildSidewalkGraph();
+    const edges = graph.edgeList();
+    const terrace = OUTDOOR_ZONES.find((zone) => zone.id === 'cafe-terrace');
+
+    const distanceToGraph = (point: Point): number => {
+      let best = Infinity;
+      for (const [from, to] of edges) {
+        best = Math.min(best, distance(point, closestPointOnSegment(point, from, to)));
+      }
+      return best;
+    };
+
+    const insideTerrace = (point: Point): boolean =>
+      terrace !== undefined &&
+      point.x >= terrace.minX - 1 &&
+      point.x <= terrace.maxX + 1 &&
+      point.z >= terrace.minZ - 1 &&
+      point.z <= terrace.maxZ + 1;
+
+    for (const citizen of world.citizens) {
+      const route = citizen.path.length > 1 ? citizen.path : lastRouteOf(citizen.id);
+      expect(route.length, `${citizen.id} never walked anywhere`).toBeGreaterThan(1);
+
+      // Every point is a node of the graph, except the spot on the cafe
+      // terrace the route ends on, which is the one step off the pavement.
+      route.forEach((point, index) => {
+        const onGraph = distanceToGraph(point) < 0.01;
+        expect(onGraph || insideTerrace(point), `${citizen.id} point ${index}`).toBe(true);
+      });
     }
   });
 

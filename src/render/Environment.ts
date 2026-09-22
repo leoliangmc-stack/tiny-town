@@ -27,7 +27,7 @@ const MAX_SUN_ELEVATION = (52 * Math.PI) / 180;
  * directly behind the viewer every shadow hides behind its own building and
  * the town goes flat at noon.
  */
-const NOON_AZIMUTH = (112 * Math.PI) / 180;
+const NOON_AZIMUTH = (135 * Math.PI) / 180;
 
 /** The sun never drops below this, so night keeps a low raking moonlight. */
 const MIN_SUN_ELEVATION = (4 * Math.PI) / 180;

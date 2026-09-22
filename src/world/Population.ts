@@ -25,7 +25,7 @@ export const RESIDENTS: readonly ResidentTemplate[] = [
   {
     id: 'tom',
     name: 'Tom',
-    homeId: 'house-1',
+    homeId: 'house-03',
     shirtColor: 0xd9604a,
     walkSpeed: 4.6,
     schedule: {
@@ -38,7 +38,7 @@ export const RESIDENTS: readonly ResidentTemplate[] = [
   {
     id: 'sarah',
     name: 'Sarah',
-    homeId: 'house-2',
+    homeId: 'house-16',
     shirtColor: 0x4a7fd9,
     walkSpeed: 4.2,
     schedule: {
@@ -51,7 +51,7 @@ export const RESIDENTS: readonly ResidentTemplate[] = [
   {
     id: 'ruth',
     name: 'Ruth',
-    homeId: 'house-3',
+    homeId: 'house-06',
     shirtColor: 0xe0a53c,
     walkSpeed: 3.9,
     schedule: {
@@ -64,7 +64,7 @@ export const RESIDENTS: readonly ResidentTemplate[] = [
   {
     id: 'oscar',
     name: 'Oscar',
-    homeId: 'house-4',
+    homeId: 'house-13',
     shirtColor: 0x5fae7a,
     walkSpeed: 4.8,
     schedule: {
@@ -77,7 +77,7 @@ export const RESIDENTS: readonly ResidentTemplate[] = [
   {
     id: 'lena',
     name: 'Lena',
-    homeId: 'house-5',
+    homeId: 'house-08',
     shirtColor: 0xa96fc4,
     walkSpeed: 4.4,
     schedule: {
