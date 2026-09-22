@@ -6,4 +6,5 @@ export * from './Rng.js';
 export * from './Navigation.js';
 export * from './TickScheduler.js';
 export * from './TimeSystem.js';
+export * from './VehicleSystem.js';
 export * from './World.js';

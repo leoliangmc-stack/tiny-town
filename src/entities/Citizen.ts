@@ -111,10 +111,19 @@ export interface Citizen {
   plan: Appointment[];
   planIndex: number;
   planDay: number;
-  /** What the citizen is walking towards, if walking. */
+  /** What the citizen is walking or driving towards, if on a trip. */
   pending?: Appointment;
+  /**
+   * The legs of a driven trip: to the car on foot, at the wheel, then from the
+   * car to the door on foot. Absent on a walked trip.
+   */
+  tripStage?: 'toVehicle' | 'driving' | 'fromVehicle';
+  /** The vehicle the citizen is aboard, while driving. */
+  vehicleId?: string;
   /** Minute of the day the current stationary activity ends. */
   activityUntil: number;
+  /** Minute of the day the citizen reached the place they are at. */
+  arrivedAt: number;
 
   /**
    * Rises through the day while alone, drops while socialising. Past a
@@ -126,14 +135,19 @@ export interface Citizen {
   lateToday: number;
 }
 
-/** True while the citizen is out of doors and should be drawn. */
+/** True while the citizen is out of doors and should be drawn as a figure. */
 export function isOutside(citizen: Citizen): boolean {
-  return citizen.place.kind !== 'building';
+  return citizen.place.kind !== 'building' && citizen.activity !== 'Drive';
 }
 
 /** True while the citizen is walking, which drives the walking animation. */
 export function isWalking(citizen: Citizen): boolean {
   return citizen.activity === 'Walk' || citizen.activity === 'GoHome';
+}
+
+/** True while the citizen is inside a vehicle, and so drawn by it, not as a figure. */
+export function isAboard(citizen: Citizen): boolean {
+  return citizen.activity === 'Drive';
 }
 
 /** True while the citizen is at home and awake, which lights the windows. */

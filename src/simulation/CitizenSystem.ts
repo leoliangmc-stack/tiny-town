@@ -1,5 +1,6 @@
 import { doorPosition } from '../entities/Building.js';
 import type { Appointment, Citizen, Place } from '../entities/Citizen.js';
+import type { Vehicle } from '../entities/Vehicle.js';
 import { distance, type Point } from '../entities/geometry.js';
 import { createPopulation } from '../world/Population.js';
 import { getBuilding, getZone, type OutdoorZone } from '../world/Town.js';
@@ -8,6 +9,7 @@ import { GAME_MINUTES_PER_TICK } from './constants.js';
 import { clockWords, EventLog, minutesInWords } from './EventLog.js';
 import { buildSidewalkGraph, entranceNodeId, NavGraph } from './Navigation.js';
 import { LATE_GRACE_MINUTES, ScheduleSystem } from './ScheduleSystem.js';
+import { VehicleSystem } from './VehicleSystem.js';
 
 /** How each outdoor zone reads in a sentence. */
 const ZONE_PHRASES: Record<string, string> = {
@@ -57,10 +59,21 @@ export class CitizenSystem {
   /** Who has already had a meeting written up today, to keep the diary fresh. */
   private metToday = new Set<string>();
 
+  /** Set by the World once the road graph exists; citizens walk until then. */
+  vehicles: VehicleSystem | undefined;
+
   constructor(seed: number | string) {
     this.sidewalks = buildSidewalkGraph();
     this.citizens = createPopulation((id) => doorPosition(getBuilding(id)));
     this.schedule = new ScheduleSystem(seed, (from, to) => this.routeLength(from, to));
+  }
+
+  homeOf(citizenId: string): string {
+    const citizen = this.find(citizenId);
+    if (!citizen) {
+      throw new Error(`Unknown citizen: ${citizenId}`);
+    }
+    return citizen.homeId;
   }
 
   find(id: string): Citizen | undefined {
@@ -92,6 +105,7 @@ export class CitizenSystem {
       this.updateSocialNeed(citizen);
       this.advance(citizen, day, minuteOfDay);
       this.walk(citizen, day, minuteOfDay);
+      this.ride(citizen, day, minuteOfDay);
     }
 
     this.noteLastLightOut(day, minuteOfDay);
@@ -123,7 +137,11 @@ export class CitizenSystem {
 
   /** Starts whatever is due: the next appointment, a whim, or a fallback. */
   private advance(citizen: Citizen, day: number, minute: number): void {
-    if (citizen.activity === 'Walk' || citizen.activity === 'GoHome') {
+    if (
+      citizen.activity === 'Walk' ||
+      citizen.activity === 'GoHome' ||
+      citizen.activity === 'Drive'
+    ) {
       return;
     }
 
@@ -180,7 +198,14 @@ export class CitizenSystem {
     if (citizen.activity === 'Socialize') {
       citizen.socialNeed = 0;
     }
-    if (citizen.place.kind === 'building' && citizen.place.id === citizen.homeId) {
+    const next = citizen.plan[citizen.planIndex];
+    const atHome = citizen.place.kind === 'building' && citizen.place.id === citizen.homeId;
+    // Nothing due for a while: home. Something due soon: wait where you are
+    // rather than set off home for four minutes, as long as the whole stay
+    // at this spot remains a short one.
+    const shortWait =
+      next !== undefined && next.at - minute < 20 && next.at - citizen.arrivedAt < 28;
+    if (atHome || shortWait) {
       citizen.activity = 'Relax';
       citizen.activityUntil = Infinity;
       return;
@@ -208,7 +233,10 @@ export class CitizenSystem {
       return;
     }
 
-    const route = this.routeTo(citizen, appointment.place);
+    const vehicle = this.vehicleFor(citizen, appointment.place);
+    const route = vehicle
+      ? [{ ...citizen.position }, { ...vehicle.position }]
+      : this.routeTo(citizen, appointment.place);
     this.leaveSpot(citizen);
     citizen.path = route;
     citizen.pathIndex = 1;
@@ -217,6 +245,14 @@ export class CitizenSystem {
     citizen.pending = appointment;
     citizen.activityUntil = Infinity;
     citizen.activity = appointment.place.id === citizen.homeId ? 'GoHome' : 'Walk';
+    if (vehicle) {
+      // First leg on foot, to where the car is parked.
+      citizen.tripStage = 'toVehicle';
+      citizen.vehicleId = vehicle.id;
+    } else {
+      delete citizen.tripStage;
+      delete citizen.vehicleId;
+    }
 
     if (appointment.note) {
       this.log.record(day, minute, appointment.note, 'colour');
@@ -232,11 +268,110 @@ export class CitizenSystem {
     }
   }
 
+  /**
+   * The vehicle a citizen takes for this trip, if any: their own, parked where
+   * they are, with somewhere to park at the far end (SPEC.md 2.5). Otherwise
+   * they walk, and the car stays put.
+   */
+  private vehicleFor(citizen: Citizen, destination: Place): Vehicle | undefined {
+    if (!this.vehicles || citizen.place.kind === 'street') {
+      return undefined;
+    }
+    const vehicle = this.vehicles.vehicleOf(citizen.id);
+    const parkedHere =
+      vehicle &&
+      (this.vehicles.isParkedAt(vehicle, citizen.place) ||
+        this.vehicles.isParkedNear(vehicle, citizen.position));
+    if (!vehicle || !parkedHere) {
+      return undefined;
+    }
+    // A trip that ends where the car already stands (a building and its own
+    // outdoor zone, or a place just down the street) is walked.
+    if (this.vehicles.isParkedNear(vehicle, this.arrivalPoint(citizen, destination))) {
+      return undefined;
+    }
+    if (vehicle.workplaceId) {
+      // A works van does the rounds and nothing else: out to a house and
+      // back to the yard. It never goes home with the driver or to the cafe.
+      const destinationKind =
+        destination.kind === 'building' ? getBuilding(destination.id).kind : null;
+      const onRounds =
+        destination.id === vehicle.workplaceId ||
+        ((destinationKind === 'house' || destinationKind === 'apartment') &&
+          destination.id !== citizen.homeId);
+      return onRounds ? vehicle : undefined;
+    }
+    return vehicle;
+  }
+
+  /**
+   * The driven legs of a trip. On foot to the car, then aboard while the
+   * VehicleSystem drives, then on foot from the car to the door. The citizen's
+   * position follows the car while aboard, so anything following the citizen
+   * sees one continuous track.
+   */
+  private ride(citizen: Citizen, day: number, minute: number): void {
+    const vehicles = this.vehicles;
+    if (!vehicles || !citizen.vehicleId || !citizen.pending) {
+      return;
+    }
+    const vehicle = vehicles.find(citizen.vehicleId);
+    if (!vehicle) {
+      return;
+    }
+
+    if (citizen.tripStage === 'toVehicle' && citizen.pathIndex >= citizen.path.length) {
+      if (vehicles.beginTrip(vehicle, citizen.id, citizen.pending.place)) {
+        citizen.tripStage = 'driving';
+        citizen.activity = 'Drive';
+        citizen.path = [];
+      } else {
+        // Nowhere to park or no road: walk instead, from where the car is.
+        delete citizen.tripStage;
+        delete citizen.vehicleId;
+        citizen.path = this.routeTo(citizen, citizen.pending.place);
+        citizen.pathIndex = 1;
+        citizen.activity = citizen.pending.place.id === citizen.homeId ? 'GoHome' : 'Walk';
+      }
+      return;
+    }
+
+    if (citizen.tripStage === 'driving') {
+      citizen.position = { ...VehicleSystem.roadPosition(vehicle) };
+      citizen.heading = vehicle.heading;
+      if (vehicle.state === 'parked') {
+        // Last leg on foot: from the space to the door, or the spot in the zone.
+        citizen.tripStage = 'fromVehicle';
+        citizen.activity = citizen.pending.place.id === citizen.homeId ? 'GoHome' : 'Walk';
+        citizen.position = { ...vehicle.position };
+        citizen.path = [{ ...vehicle.position }, this.arrivalPoint(citizen, citizen.pending.place)];
+        citizen.pathIndex = 1;
+      }
+      return;
+    }
+
+    if (citizen.tripStage === 'fromVehicle' && citizen.pathIndex >= citizen.path.length) {
+      delete citizen.tripStage;
+      delete citizen.vehicleId;
+      this.arrive(citizen, citizen.pending, day, minute);
+    }
+  }
+
+  /** Where a trip to a place ends: its door, or the citizen's spot in the zone. */
+  private arrivalPoint(citizen: Citizen, place: Place): Point {
+    if (place.kind === 'zone') {
+      const zone = getZone(place.id);
+      return { ...zone.spawnPoints[this.chooseSpot(citizen, zone)] };
+    }
+    return { ...doorPosition(getBuilding(place.id)) };
+  }
+
   /** Takes up an appointment on the spot. */
   private arrive(citizen: Citizen, appointment: Appointment, day: number, minute: number): void {
     citizen.place = { ...appointment.place };
     citizen.activity = appointment.activity;
     citizen.activityUntil = appointment.duration > 0 ? minute + appointment.duration : Infinity;
+    citizen.arrivedAt = minute;
     citizen.path = [];
     delete citizen.pending;
 
@@ -447,7 +582,7 @@ export class CitizenSystem {
       remaining -= step;
     }
 
-    if (citizen.pathIndex >= citizen.path.length && citizen.pending) {
+    if (citizen.pathIndex >= citizen.path.length && citizen.pending && !citizen.tripStage) {
       this.arrive(citizen, citizen.pending, day, minute);
     }
   }

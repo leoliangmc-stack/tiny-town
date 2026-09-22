@@ -2,11 +2,23 @@ import type { Citizen } from '../entities/Citizen.js';
 import { isHomeAndAwake } from '../entities/Citizen.js';
 import { CAFE_CLOSES_AT, CAFE_ID, CAFE_OPENS_AT, HOUSES } from '../world/Town.js';
 
+import type { Point } from '../entities/geometry.js';
+import type { Vehicle } from '../entities/Vehicle.js';
+
 import { CitizenSystem } from './CitizenSystem.js';
 import type { EventLog } from './EventLog.js';
 import { buildRoadGraph, NavGraph } from './Navigation.js';
 import { Rng } from './Rng.js';
 import { TimeSystem } from './TimeSystem.js';
+import { VehicleSystem } from './VehicleSystem.js';
+
+/** Where a follower should look: the citizen on foot, in a car, or indoors. */
+export interface FollowTarget {
+  position: Point;
+  heading: number;
+  mode: 'onFoot' | 'inVehicle' | 'indoors';
+  vehicleId?: string;
+}
 
 export interface WorldOptions {
   /** Seed for every random choice in the simulation. */
@@ -36,6 +48,7 @@ export class World {
   readonly rng: Rng;
   readonly time = new TimeSystem();
   readonly citizenSystem: CitizenSystem;
+  readonly vehicleSystem: VehicleSystem;
   readonly roads: NavGraph;
 
   constructor(options: WorldOptions = {}) {
@@ -43,6 +56,39 @@ export class World {
     this.rng = new Rng(this.seed);
     this.citizenSystem = new CitizenSystem(this.seed);
     this.roads = buildRoadGraph();
+    this.vehicleSystem = new VehicleSystem(this.roads, (id) => this.citizenSystem.homeOf(id));
+    this.citizenSystem.vehicles = this.vehicleSystem;
+  }
+
+  get vehicles(): readonly Vehicle[] {
+    return this.vehicleSystem.vehicles;
+  }
+
+  /**
+   * One continuous track for a follower (SPEC.md 2.9, Phase 6): the citizen's
+   * own position on foot, the car's while aboard, the door while indoors.
+   */
+  followTarget(citizenId: string): FollowTarget | undefined {
+    const citizen = this.citizenSystem.find(citizenId);
+    if (!citizen) {
+      return undefined;
+    }
+    if (citizen.activity === 'Drive' && citizen.vehicleId) {
+      const vehicle = this.vehicleSystem.find(citizen.vehicleId);
+      if (vehicle) {
+        return {
+          position: VehicleSystem.roadPosition(vehicle),
+          heading: vehicle.heading,
+          mode: 'inVehicle',
+          vehicleId: vehicle.id,
+        };
+      }
+    }
+    return {
+      position: { ...citizen.position },
+      heading: citizen.heading,
+      mode: citizen.place.kind === 'building' ? 'indoors' : 'onFoot',
+    };
   }
 
   get citizens(): readonly Citizen[] {
@@ -90,6 +136,8 @@ export class World {
    */
   tick(): void {
     this.time.tick();
+    // Vehicles move first, so a citizen aboard mirrors this tick's position.
+    this.vehicleSystem.tick(this.time.minuteOfDay);
     this.citizenSystem.tick(this.time.day, this.time.minuteOfDay);
   }
 
@@ -123,6 +171,13 @@ export class World {
           at: round(item.at),
           duration: round(item.duration),
         })),
+      })),
+      vehicles: this.vehicles.map((vehicle) => ({
+        ...vehicle,
+        position: { x: round(vehicle.position.x), z: round(vehicle.position.z) },
+        heading: round(vehicle.heading),
+        distanceDriven: round(vehicle.distanceDriven),
+        heldForMinutes: round(vehicle.heldForMinutes),
       })),
       log: this.log.entries,
     });

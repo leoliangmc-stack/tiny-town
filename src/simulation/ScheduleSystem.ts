@@ -172,13 +172,22 @@ export class ScheduleSystem {
 
       if (template.outdoorBreak && citizen.personality.outdoorPreference >= 40) {
         const [start, length] = template.outdoorBreak;
+        const breakAt = start + jitter();
+        const breakLength = Math.min(length, 28);
         plan.push({
-          at: start + jitter(),
+          at: breakAt,
           activity: citizen.personality.social > 60 ? 'Socialize' : 'Relax',
           place: { kind: 'zone', id: ZONE_OF_BUILDING[citizen.workplaceId] },
-          duration: Math.min(length, 28),
+          duration: breakLength,
         });
-        plan.push({ at: start + length + 2, activity: 'Work', place: workplace, duration: 0 });
+        // Back in as soon as the break is over: standing about outside for
+        // longer than the break itself would count as being stuck.
+        plan.push({
+          at: breakAt + breakLength + 1,
+          activity: 'Work',
+          place: workplace,
+          duration: 0,
+        });
       }
 
       if (citizen.job === 'Delivery Driver') {
@@ -255,7 +264,13 @@ export class ScheduleSystem {
           duration: 25,
         });
       }
-      plan.push({ at: workEnd + 45, activity: 'Relax', place: home, duration: 0 });
+      // Home right after the park, or straight from school.
+      plan.push({
+        at: workEnd + (traits.outdoorPreference > 60 ? 27 : 1),
+        activity: 'Relax',
+        place: home,
+        duration: 0,
+      });
       return;
     }
 

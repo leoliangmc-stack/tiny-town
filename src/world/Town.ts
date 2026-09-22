@@ -546,6 +546,47 @@ export const FLOWER_BEDS: readonly FlowerBed[] = [
   { minX: -76, maxX: -64, minZ: -9.5, maxZ: -7.5 },
 ];
 
+/**
+ * Where cars stand when not in the car park: at the kerb outside a building,
+ * one node per space on the road graph (SPEC.md 2.5). Homes get one space,
+ * the busier public buildings a few, the park two for visitors. The space
+ * sits on the road edge nearest the building's door; Navigation.ts places it.
+ */
+export const KERB_SPACES: Readonly<Record<string, number>> = {
+  school: 2,
+  cafe: 2,
+  bakery: 1,
+  office: 4,
+  park: 2,
+};
+
+/**
+ * Every home has two kerb spaces, so the owner's car and a delivery van can
+ * both stand outside; public buildings use the table above.
+ */
+export function kerbSpaceCount(buildingId: string): number {
+  return KERB_SPACES[buildingId] ?? 2;
+}
+
+/** The point the park's kerb spaces are placed from: its edge on the high street. */
+export const PARK_FRONT: Point = { x: -36, z: 7 };
+
+/**
+ * Traffic lights at the two junctions either side of the town centre. A cycle
+ * gives the high street the green first, then the cross street.
+ */
+export interface TrafficLight {
+  x: number;
+  z: number;
+  /** Game minutes each direction holds green. */
+  greenMinutes: number;
+}
+
+export const TRAFFIC_LIGHTS: readonly TrafficLight[] = [
+  { x: -18, z: 0, greenMinutes: 1.5 },
+  { x: 18, z: 0, greenMinutes: 1.5 },
+];
+
 export const STREET_LAMP_HEIGHT = 5.2;
 
 /** Street lamps, spaced along the pavement of every street. */

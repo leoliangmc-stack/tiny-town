@@ -1,12 +1,17 @@
 import { doorPosition } from '../entities/Building.js';
 import { closestPointOnSegment, distance, type Point } from '../entities/geometry.js';
+import type { Place } from '../entities/Citizen.js';
 import {
   BUILDINGS,
+  PARK_FRONT,
   PARKING_LOT,
+  ROAD_WIDTH,
   SIDEWALK_OFFSET,
   STREETS,
   type Street,
+  getZone,
   junctions,
+  kerbSpaceCount,
 } from '../world/Town.js';
 
 /**
@@ -303,6 +308,69 @@ export function parkingNodeId(index: number): string {
   return `parking-${index}`;
 }
 
+export function kerbNodeId(buildingId: string, index: number): string {
+  return `kerb-${buildingId}-${index}`;
+}
+
+/** Spacing of kerb spaces along the road, a car length and a bit. */
+const KERB_SPACE_SPACING = 5.6;
+
+/** How far in from the centreline a kerb space sits: on the near side, by the pavement. */
+const KERB_INSET = ROAD_WIDTH / 2 - 1.1;
+
+/**
+ * The parking nodes a trip to a place may end at, nearest first by index.
+ * The supermarket has its car park; every other building a few kerb spaces;
+ * a zone borrows its building's.
+ */
+export function parkingNodesForPlace(place: Place): string[] {
+  const buildingId = place.kind === 'zone' ? getZone(place.id).buildingId : place.id;
+  if (buildingId === 'supermarket') {
+    return PARKING_LOT.spaces.map((_, index) => parkingNodeId(index));
+  }
+  return Array.from({ length: kerbSpaceCount(buildingId) }, (_, index) =>
+    kerbNodeId(buildingId, index),
+  );
+}
+
+/** The street a door is closest to, and the door's projection onto its centreline. */
+function nearestStreet(point: Point): { street: Street; onCentreline: Point } {
+  let best: { street: Street; onCentreline: Point; away: number } | undefined;
+  for (const street of STREETS) {
+    const from =
+      street.axis === 'x' ? { x: street.from, z: street.at } : { x: street.at, z: street.from };
+    const to =
+      street.axis === 'x' ? { x: street.to, z: street.at } : { x: street.at, z: street.to };
+    const onCentreline = closestPointOnSegment(point, from, to);
+    const away = distance(point, onCentreline);
+    if (!best || away < best.away) {
+      best = { street, onCentreline, away };
+    }
+  }
+  if (!best) {
+    throw new Error('No streets to park on');
+  }
+  return { street: best.street, onCentreline: best.onCentreline };
+}
+
+/** Adds the kerb spaces outside one building (or the park) as spur nodes. */
+function addKerbSpaces(graph: NavGraph, id: string, front: Point): void {
+  const { street, onCentreline } = nearestStreet(front);
+  // Toward the building, then along the street from a little before the door.
+  const towardX = Math.sign(front.x - onCentreline.x);
+  const towardZ = Math.sign(front.z - onCentreline.z);
+  const count = kerbSpaceCount(id);
+  for (let index = 0; index < count; index += 1) {
+    const along = (index - (count - 1) / 2) * KERB_SPACE_SPACING;
+    const position =
+      street.axis === 'x'
+        ? { x: onCentreline.x + along, z: onCentreline.z + towardZ * KERB_INSET }
+        : { x: onCentreline.x + towardX * KERB_INSET, z: onCentreline.z + along };
+    const node = graph.addNode(position, kerbNodeId(id, index));
+    graph.connect(node, graph.nearestNode(position, node.id));
+  }
+}
+
 /** The road graph, which vehicles will use from Phase 4. */
 export function buildRoadGraph(): NavGraph {
   const graph = new NavGraph();
@@ -334,6 +402,14 @@ export function buildRoadGraph(): NavGraph {
     const node = graph.addNode(space, parkingNodeId(index));
     graph.connect(node, entrance);
   });
+
+  // Kerb spaces outside every building but the supermarket, and by the park.
+  for (const building of BUILDINGS) {
+    if (building.id !== 'supermarket') {
+      addKerbSpaces(graph, building.id, doorPosition(building));
+    }
+  }
+  addKerbSpaces(graph, 'park', PARK_FRONT);
 
   return graph;
 }

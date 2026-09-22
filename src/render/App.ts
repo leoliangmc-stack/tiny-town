@@ -21,6 +21,7 @@ import { CitizenView } from './CitizenView.js';
 import { DebugView } from './DebugView.js';
 import { Environment } from './Environment.js';
 import { TownView } from './TownView.js';
+import { VehicleView } from './VehicleView.js';
 
 /**
  * The default camera, as a direction rather than a position, so the framing can
@@ -89,6 +90,7 @@ export class App {
   private readonly environment: Environment;
   private readonly townView = new TownView();
   private readonly citizenView: CitizenView;
+  private readonly vehicleView: VehicleView;
   private readonly debugView: DebugView | undefined;
 
   private animationFrame = 0;
@@ -115,8 +117,10 @@ export class App {
     this.environment = new Environment(this.scene);
     this.frameTown();
     this.citizenView = new CitizenView(world);
+    this.vehicleView = new VehicleView(world);
     this.scene.add(this.townView.root);
     this.scene.add(this.citizenView.root);
+    this.scene.add(this.vehicleView.root);
 
     if (debugRequested()) {
       this.debugView = new DebugView(world);
@@ -127,6 +131,7 @@ export class App {
     this.environment.update(world.time.minuteOfDay);
     this.townView.update(world, this.environment.state, 10, this.camera);
     this.citizenView.update(10);
+    this.vehicleView.update(this.environment.state, 10, this.camera);
 
     window.addEventListener('resize', this.handleResize);
     window.addEventListener('keydown', this.handleKeyDown);
@@ -282,6 +287,7 @@ export class App {
     this.environment.update(this.world.time.minuteOfDay);
     this.townView.update(this.world, this.environment.state, deltaSeconds, this.camera);
     this.citizenView.update(deltaSeconds);
+    this.vehicleView.update(this.environment.state, deltaSeconds, this.camera);
 
     this.debugView?.update(this.world);
 

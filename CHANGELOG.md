@@ -1,5 +1,34 @@
 # Changelog
 
+## Phase 4 — Vehicles
+
+- `world/Fleet.ts`: eight vehicles. Six private cars to the six longest commutes among the
+  adults who would rather not walk them (Rex, Mateo, Maya, Nina, Lucia, Walter), one per
+  household; two supermarket delivery vans that Paul and Sven take on their rounds. Everyone
+  else walks, which keeps the streets quiet.
+- Road graph: kerb parking spaces outside every building (two per home, a few per public
+  building, two by the park) as spur nodes, beside the supermarket car park.
+- `VehicleSystem`: a vehicle is parked at a node until a citizen takes it; then it follows an
+  A* route on the road centrelines, keeps to the right, stops at a red light and behind
+  the car in front, and parks at the first free space at the far end, or the nearest free
+  space down the street. Two traffic lights on the high street. Cars do 15–18 metres a
+  minute against a walker's four. A car waiting on another car does not itself count as
+  something to wait for, which is what stops two cars at a corner waiting for each other
+  for ever.
+- Citizens' `Drive` state is real: on foot to the car, aboard while it drives, on foot from
+  the space to the door. A works van does the rounds and nothing else. A car is used only
+  when it is parked where the citizen is and there is somewhere to park at the far end, so
+  a car is never stranded across town.
+- `World.followTarget(citizenId)`: one continuous track for Phase 6's Follow — the
+  citizen on foot, the car while aboard, the door while indoors — with a test that the
+  hand-off never jumps more than a car length.
+- `VehicleView`: rounded bodies, cabins, four wheels that turn, headlights and taillights
+  that come on with the street lamps, with a glow and a patch of light on the road ahead
+  while moving. Seven instanced parts for the whole fleet; draw calls 204 → 214.
+- Tests: over 30 days no two vehicles overlap for more than 5 game minutes and none is held
+  for more than 30; every car is home by night; traffic in both rushes; determinism holds
+  with vehicles in the state hash.
+
 ## Phase 3.5 — Draw call refactor
 
 - `render/InstanceBatch.ts`: collects placements of one geometry and material and builds a

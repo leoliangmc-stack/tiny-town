@@ -365,6 +365,7 @@ export function createPopulation(doorOf: (buildingId: string) => Point): Citizen
         planIndex: 0,
         planDay: 0,
         activityUntil: 0,
+        arrivedAt: 0,
         socialNeed: 0,
         lateToday: 0,
       };
