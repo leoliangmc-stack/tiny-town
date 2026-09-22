@@ -1,6 +1,8 @@
 import {
   AdditiveBlending,
   BoxGeometry,
+  type BufferGeometry,
+  type Camera,
   Color,
   ConeGeometry,
   CylinderGeometry,
@@ -9,20 +11,21 @@ import {
   ExtrudeGeometry,
   Group,
   IcosahedronGeometry,
-  InstancedMesh,
+  type InstancedMesh,
+  type Material,
   Matrix4,
   Mesh,
   MeshBasicMaterial,
   MeshStandardMaterial,
-  Object3D,
   PlaneGeometry,
-  Shape,
+  Quaternion,
   RepeatWrapping,
   RGBAFormat,
+  Shape,
   SphereGeometry,
   SRGBColorSpace,
   TorusGeometry,
-  type Sprite,
+  Vector3,
 } from 'three';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 
@@ -49,7 +52,8 @@ import {
 } from '../world/Town.js';
 
 import type { EnvironmentState } from './Environment.js';
-import { createGlowSprite, glowTexture } from './glow.js';
+import { glowTexture } from './glow.js';
+import { type BatchOptions, composeMatrix, InstanceBatch } from './InstanceBatch.js';
 
 /** How fast a window or lamp fades between off and on, in real seconds. */
 const LIGHT_FADE_SECONDS = 0.7;
@@ -95,43 +99,87 @@ const LAYER_ZONE = 0.05;
 const LAYER_MARKING = 0.08;
 const PAVEMENT_HEIGHT = 0.18;
 
-/** Corner radius of every rounded box: enough to read as soft, not as a pillow. */
+/** Corner radius of a building's walls: enough to read as soft, not as a pillow. */
 const ROUNDING = 0.3;
 
-/** One building's meshes, plus the materials whose glow is animated. */
-interface BuildingView {
+/** Sideways offset of a glow quad from its window, and its size against the pane. */
+const GLOW_OFFSET = 0.4;
+const GLOW_SCALE = 2.4;
+
+/** One building's lights: which instances are its windows, and how lit it is. */
+interface BuildingLights {
   building: Building;
-  windowMaterial: MeshStandardMaterial;
-  windowGlows: Sprite[];
+  paneIndices: number[];
+  glowIndices: number[];
   /** Current lit amount, eased towards the target so lights fade in. */
   lit: number;
+  /** What was last written to the instances, to skip unchanged frames. */
+  written: number;
 }
+
+/** A glow quad that must face the camera: where it sits and how big it is. */
+interface Billboard {
+  position: Vector3;
+  scale: number;
+}
+
+type Placement = { x: number; y: number; z: number };
+type Scale = { x?: number; y?: number; z?: number } | number;
 
 /**
  * Everything standing still in the town: ground, roads, pavements, buildings
  * and their yards, outdoor zones, the park, the car park, trees, shrubs,
  * flower beds, lamps and signs.
  *
- * The geometry is built once from the layout data in world/Town.ts. Each frame
- * only the lights change.
+ * Every repeated shape is one InstancedMesh (PHASES.md Phase 3.5): a window
+ * pane, a lamp post, a tree crown, a plain box of trim, each drawn once for
+ * the whole town with a colour per instance. Only the walls and roofs of the
+ * forty buildings are meshes of their own. The geometry is built once from the
+ * layout data in world/Town.ts; each frame only the lights and the camera
+ * facing glows change.
  */
 export class TownView {
   readonly root = new Group();
 
-  private readonly buildingViews: BuildingView[] = [];
+  private readonly batches = new Map<string, InstanceBatch>();
+  private readonly buildingLights: BuildingLights[] = [];
+
+  private readonly matteWhite = matte(0xffffff);
+  private readonly paneMaterial: MeshStandardMaterial;
+  private readonly windowGlowMaterial: MeshBasicMaterial;
   private readonly lampMaterial: MeshStandardMaterial;
+  private readonly lampHaloMaterial: MeshBasicMaterial;
   private readonly lampPoolMaterial: MeshBasicMaterial;
-  private readonly lampGlowSprites: Sprite[] = [];
+
+  private readonly windowGlowBillboards: Billboard[] = [];
+  private readonly lampHaloBillboards: Billboard[] = [];
+  private readonly lastCameraQuaternion = new Quaternion(0, 0, 0, 0);
   private lampLit = 0;
 
   constructor() {
     this.root.name = 'town';
 
+    this.paneMaterial = makePaneMaterial();
+    this.windowGlowMaterial = new MeshBasicMaterial({
+      map: glowTexture(),
+      blending: AdditiveBlending,
+      transparent: true,
+      depthWrite: false,
+      opacity: 0.42,
+    });
     this.lampMaterial = new MeshStandardMaterial({
       color: COLOR.ironwork,
       emissive: new Color(LAMP_EMISSIVE),
       emissiveIntensity: 0,
       roughness: 0.8,
+    });
+    this.lampHaloMaterial = new MeshBasicMaterial({
+      map: glowTexture(),
+      color: new Color(LAMP_EMISSIVE),
+      blending: AdditiveBlending,
+      transparent: true,
+      depthWrite: false,
+      opacity: 0,
     });
     this.lampPoolMaterial = new MeshBasicMaterial({
       map: glowTexture(),
@@ -141,6 +189,8 @@ export class TownView {
       depthWrite: false,
       opacity: 0,
     });
+
+    this.defineBatches();
 
     this.addGround();
     this.addStreets();
@@ -156,6 +206,61 @@ export class TownView {
     this.addTrees();
     this.addStreetLamps();
     this.addStreetSigns();
+
+    for (const batch of this.batches.values()) {
+      batch.build(this.root);
+    }
+  }
+
+  /** The shared shapes, each a unit geometry scaled per instance. */
+  private defineBatches(): void {
+    const shadow: BatchOptions = { castShadow: true, receiveShadow: true };
+    const define = (
+      name: string,
+      geometry: BufferGeometry,
+      material: Material,
+      options: BatchOptions = shadow,
+    ): void => {
+      this.batches.set(name, new InstanceBatch(name, geometry, material, options));
+    };
+
+    // Ground plane pieces: roads, patches, paths, markings.
+    define('slab', flatUnitPlane(), this.matteWhite, { receiveShadow: true });
+
+    // Plain shapes for trim and props, coloured per instance.
+    define('box', new BoxGeometry(1, 1, 1), this.matteWhite);
+    define('roundedBox', new RoundedBoxGeometry(1, 1, 1, 2, 0.08), this.matteWhite);
+    define('cylinder', new CylinderGeometry(1, 1, 1, 10), this.matteWhite);
+    define('sphere', new SphereGeometry(1, 8, 6), this.matteWhite);
+    define('cone', new ConeGeometry(1, 1, 12), this.matteWhite);
+    define('torus', new TorusGeometry(0.34, 0.05, 6, 16), this.matteWhite);
+
+    // Windows: frame, sill, pane and the glow in front of the pane.
+    define('windowFrame', new BoxGeometry(1, 1, 1), this.matteWhite);
+    define('windowSill', new BoxGeometry(1, 1, 1), this.matteWhite);
+    define('windowPane', new PlaneGeometry(1, 1), this.paneMaterial, {});
+    define('windowGlow', new PlaneGeometry(1, 1), this.windowGlowMaterial, {});
+
+    // Trees and shrubs.
+    define('trunk', new CylinderGeometry(0.26, 0.4, 1, 8), this.matteWhite);
+    define('crown', new IcosahedronGeometry(1, 1), this.matteWhite);
+    define('pineLayer', new ConeGeometry(1, 1, 12), this.matteWhite);
+    define('shrub', new IcosahedronGeometry(1, 1), this.matteWhite);
+
+    // Street lamps.
+    define('lampPole', new CylinderGeometry(0.08, 0.12, STREET_LAMP_HEIGHT, 8), this.matteWhite);
+    define('lampHead', new RoundedBoxGeometry(0.7, 0.24, 0.7, 2, 0.08), this.lampMaterial, {});
+    define('lampBulb', new SphereGeometry(0.22, 10, 8), this.lampMaterial, {});
+    define('lampHalo', new PlaneGeometry(1, 1), this.lampHaloMaterial, {});
+    define('lampPool', flatUnitPlane(), this.lampPoolMaterial, {});
+  }
+
+  private batch(name: string): InstanceBatch {
+    const found = this.batches.get(name);
+    if (!found) {
+      throw new Error(`Unknown batch: ${name}`);
+    }
+    return found;
   }
 
   private addGround(): void {
@@ -170,121 +275,124 @@ export class TownView {
     this.root.add(ground);
   }
 
+  /** A flat rectangle on the ground: roads, patches, paths, painted lines. */
+  private slab(
+    centreX: number,
+    centreZ: number,
+    sizeX: number,
+    sizeZ: number,
+    y: number,
+    color: number,
+  ): void {
+    this.batch('slab').place({ x: centreX, y, z: centreZ }, {}, { x: sizeX, z: sizeZ }, color);
+  }
+
   /** Tarmac, raised kerbs and a dashed centre line for every street. */
   private addStreets(): void {
-    const roadMaterial = matte(COLOR.road);
-    const kerbMaterial = matte(COLOR.pavement);
-    const markingMaterial = matte(COLOR.marking);
-
     for (const street of STREETS) {
       const length = street.to - street.from;
+      const middle = (street.from + street.to) / 2;
+      const alongX = street.axis === 'x';
 
-      const road = new Mesh(slab(length, ROAD_WIDTH, street.axis), roadMaterial);
-      road.position.set(...slabPosition(street, 0, LAYER_ROAD));
-      road.receiveShadow = true;
-      this.root.add(road);
+      this.slab(
+        alongX ? middle : street.at,
+        alongX ? street.at : middle,
+        alongX ? length : ROAD_WIDTH,
+        alongX ? ROAD_WIDTH : length,
+        LAYER_ROAD,
+        COLOR.road,
+      );
 
       const kerbWidth = SIDEWALK_EDGE - ROAD_WIDTH / 2;
       for (const side of [-1, 1] as const) {
-        const kerb = new Mesh(
-          street.axis === 'x'
-            ? new BoxGeometry(length + kerbWidth * 2, PAVEMENT_HEIGHT, kerbWidth)
-            : new BoxGeometry(kerbWidth, PAVEMENT_HEIGHT, length + kerbWidth * 2),
-          kerbMaterial,
-        );
         const offset = side * (ROAD_WIDTH / 2 + kerbWidth / 2);
-        kerb.position.set(...slabPosition(street, offset, PAVEMENT_HEIGHT / 2));
-        kerb.receiveShadow = true;
-        this.root.add(kerb);
+        this.batch('box').place(
+          {
+            x: alongX ? middle : street.at + offset,
+            y: PAVEMENT_HEIGHT / 2,
+            z: alongX ? street.at + offset : middle,
+          },
+          {},
+          {
+            x: alongX ? length + kerbWidth * 2 : kerbWidth,
+            y: PAVEMENT_HEIGHT,
+            z: alongX ? kerbWidth : length + kerbWidth * 2,
+          },
+          COLOR.pavement,
+        );
       }
 
-      this.addCentreLine(street, markingMaterial);
+      this.addCentreLine(street);
     }
 
     // The junctions are plain tarmac, which also covers the kerb corners.
     for (const junction of junctions()) {
-      const patch = new Mesh(slab(SIDEWALK_EDGE * 2, SIDEWALK_EDGE * 2, 'x'), roadMaterial);
-      patch.position.set(junction.x, LAYER_ROAD + 0.01, junction.z);
-      patch.receiveShadow = true;
-      this.root.add(patch);
+      this.slab(
+        junction.x,
+        junction.z,
+        SIDEWALK_EDGE * 2,
+        SIDEWALK_EDGE * 2,
+        LAYER_ROAD + 0.01,
+        COLOR.road,
+      );
     }
 
-    this.addZebraCrossings(markingMaterial);
+    this.addZebraCrossings();
   }
 
-  private addCentreLine(street: Street, material: MeshStandardMaterial): void {
+  private addCentreLine(street: Street): void {
     const dashLength = 2.6;
     const gap = 4;
     const step = dashLength + gap;
     // Keep the dashes clear of the junction patches at either end.
     const count = Math.floor((street.to - street.from - SIDEWALK_EDGE * 2) / step);
-
-    const dashes = new InstancedMesh(slab(dashLength, 0.26, street.axis), material, count);
-    dashes.receiveShadow = true;
-    const placement = new Object3D();
+    const alongX = street.axis === 'x';
 
     for (let index = 0; index < count; index += 1) {
       const along = street.from + SIDEWALK_EDGE + gap / 2 + index * step + dashLength / 2;
-      placement.position.set(
-        street.axis === 'x' ? along : street.at,
+      this.slab(
+        alongX ? along : street.at,
+        alongX ? street.at : along,
+        alongX ? dashLength : 0.26,
+        alongX ? 0.26 : dashLength,
         LAYER_MARKING,
-        street.axis === 'x' ? street.at : along,
+        COLOR.marking,
       );
-      placement.updateMatrix();
-      dashes.setMatrixAt(index, placement.matrix);
     }
-    dashes.instanceMatrix.needsUpdate = true;
-    this.root.add(dashes);
   }
 
   /** Painted stripes across each arm of every junction (DESIGN.md §7). */
-  private addZebraCrossings(material: MeshStandardMaterial): void {
+  private addZebraCrossings(): void {
     const stripeLength = 1.8;
     const stripeWidth = 0.55;
     const stripesPerCrossing = 6;
-    const crossings = junctions();
-    const arms = 4;
 
-    const stripes = new InstancedMesh(
-      slab(stripeLength, stripeWidth, 'x'),
-      material,
-      crossings.length * arms * stripesPerCrossing,
-    );
-    stripes.receiveShadow = true;
-    const placement = new Object3D();
-    let index = 0;
-
-    for (const junction of crossings) {
+    for (const junction of junctions()) {
       for (const [dx, dz] of [
         [1, 0],
         [-1, 0],
         [0, 1],
         [0, -1],
       ]) {
+        if (!this.streetContinues(junction, dx, dz)) {
+          continue;
+        }
         // A crossing sits just past the pavement corner on each arm.
         const along = SIDEWALK_EDGE + stripeLength / 2 + 0.4;
         const armIsX = dx !== 0;
-        if (!this.streetContinues(junction, dx, dz)) {
-          index += stripesPerCrossing;
-          continue;
-        }
         for (let stripe = 0; stripe < stripesPerCrossing; stripe += 1) {
           const across = ((stripe + 0.5) / stripesPerCrossing - 0.5) * (ROAD_WIDTH - 0.6);
-          placement.position.set(
+          this.slab(
             junction.x + (armIsX ? dx * along : across),
-            LAYER_MARKING,
             junction.z + (armIsX ? across : dz * along),
+            armIsX ? stripeLength : stripeWidth,
+            armIsX ? stripeWidth : stripeLength,
+            LAYER_MARKING,
+            COLOR.marking,
           );
-          placement.rotation.y = armIsX ? 0 : Math.PI / 2;
-          placement.updateMatrix();
-          stripes.setMatrixAt(index, placement.matrix);
-          index += 1;
         }
       }
     }
-    stripes.count = index;
-    stripes.instanceMatrix.needsUpdate = true;
-    this.root.add(stripes);
   }
 
   /** Whether a street actually leaves the junction in the given direction. */
@@ -308,18 +416,14 @@ export class TownView {
   /** The patches of ground outside the public buildings, and the park lawn. */
   private addOutdoorZones(): void {
     for (const zone of OUTDOOR_ZONES) {
-      const patch = new Mesh(
-        new PlaneGeometry(zone.maxX - zone.minX, zone.maxZ - zone.minZ),
-        matte(ZONE_COLORS[zone.kind]),
-      );
-      patch.rotation.x = -Math.PI / 2;
-      patch.position.set(
+      this.slab(
         (zone.minX + zone.maxX) / 2,
-        zone.kind === 'lawn' ? LAYER_ZONE - 0.01 : LAYER_ZONE,
         (zone.minZ + zone.maxZ) / 2,
+        zone.maxX - zone.minX,
+        zone.maxZ - zone.minZ,
+        zone.kind === 'lawn' ? LAYER_ZONE - 0.01 : LAYER_ZONE,
+        ZONE_COLORS[zone.kind],
       );
-      patch.receiveShadow = true;
-      this.root.add(patch);
 
       if (zone.kind === 'terrace') {
         this.addTerraceFurniture(zone);
@@ -335,255 +439,387 @@ export class TownView {
 
   /** Round tables with a pair of stools each. */
   private addTerraceFurniture(zone: OutdoorZone): void {
-    const tableMaterial = matte(COLOR.wood);
-    const stoolMaterial = matte(COLOR.ironwork);
-
+    const cylinder = this.batch('cylinder');
     for (const spawn of zone.spawnPoints) {
-      const table = new Mesh(new CylinderGeometry(0.5, 0.45, 0.72, 12), tableMaterial);
-      table.position.set(spawn.x + 0.9, 0.36, spawn.z);
-      table.castShadow = true;
-      this.root.add(table);
-
+      cylinder.place(
+        { x: spawn.x + 0.9, y: 0.36, z: spawn.z },
+        {},
+        { x: 0.5, y: 0.72, z: 0.5 },
+        COLOR.wood,
+      );
       for (const side of [-0.75, 0.75]) {
-        const stool = new Mesh(new CylinderGeometry(0.2, 0.2, 0.42, 10), stoolMaterial);
-        stool.position.set(spawn.x + 0.9, 0.21, spawn.z + side);
-        stool.castShadow = true;
-        this.root.add(stool);
+        cylinder.place(
+          { x: spawn.x + 0.9, y: 0.21, z: spawn.z + side },
+          {},
+          { x: 0.2, y: 0.42, z: 0.2 },
+          COLOR.ironwork,
+        );
       }
     }
   }
 
   /** A climbing frame, so the schoolyard reads as a schoolyard from above. */
   private addPlaygroundFrame(zone: OutdoorZone): void {
-    const material = matte(0x5f8fb5);
+    const cylinder = this.batch('cylinder');
+    const blue = 0x5f8fb5;
     const centreX = (zone.minX + zone.maxX) / 2;
     const centreZ = (zone.minZ + zone.maxZ) / 2;
 
     for (const offset of [-2.2, 2.2]) {
-      const post = new Mesh(new CylinderGeometry(0.11, 0.11, 2.4, 8), material);
-      post.position.set(centreX + offset, 1.2, centreZ);
-      post.castShadow = true;
-      this.root.add(post);
+      cylinder.place(
+        { x: centreX + offset, y: 1.2, z: centreZ },
+        {},
+        { x: 0.11, y: 2.4, z: 0.11 },
+        blue,
+      );
     }
-    const bar = new Mesh(new CylinderGeometry(0.11, 0.11, 4.8, 8), material);
-    bar.rotation.z = Math.PI / 2;
-    bar.position.set(centreX, 2.4, centreZ);
-    bar.castShadow = true;
-    this.root.add(bar);
+    cylinder.place(
+      { x: centreX, y: 2.4, z: centreZ },
+      { z: Math.PI / 2 },
+      { x: 0.11, y: 4.8, z: 0.11 },
+      blue,
+    );
   }
 
   /** A path across the park and a few benches. */
   private addParkPathAndBenches(zone: OutdoorZone): void {
+    const centreX = (zone.minX + zone.maxX) / 2;
     const centreZ = (zone.minZ + zone.maxZ) / 2;
 
-    const path = new Mesh(new PlaneGeometry(zone.maxX - zone.minX, 2.6), matte(COLOR.parkPath));
-    path.rotation.x = -Math.PI / 2;
-    path.position.set((zone.minX + zone.maxX) / 2, LAYER_ZONE, centreZ);
-    path.receiveShadow = true;
-    this.root.add(path);
+    this.slab(centreX, centreZ, zone.maxX - zone.minX, 2.6, LAYER_ZONE, COLOR.parkPath);
 
-    const benchMaterial = matte(COLOR.wood);
+    const rounded = this.batch('roundedBox');
     for (const offset of [-7, 0, 7]) {
-      const seat = new Mesh(new RoundedBoxGeometry(2.2, 0.2, 0.6, 2, 0.06), benchMaterial);
-      seat.position.set((zone.minX + zone.maxX) / 2 + offset, 0.45, centreZ - 2.4);
-      seat.castShadow = true;
-      this.root.add(seat);
-
-      const back = new Mesh(new RoundedBoxGeometry(2.2, 0.5, 0.12, 2, 0.05), benchMaterial);
-      back.position.set((zone.minX + zone.maxX) / 2 + offset, 0.8, centreZ - 2.65);
-      back.castShadow = true;
-      this.root.add(back);
+      rounded.place(
+        { x: centreX + offset, y: 0.45, z: centreZ - 2.4 },
+        {},
+        { x: 2.2, y: 0.2, z: 0.6 },
+        COLOR.wood,
+      );
+      rounded.place(
+        { x: centreX + offset, y: 0.8, z: centreZ - 2.65 },
+        {},
+        { x: 2.2, y: 0.5, z: 0.12 },
+        COLOR.wood,
+      );
     }
   }
 
   /** Tarmac and painted bays for the car park at the east end. */
   private addParkingLot(): void {
-    const surface = new Mesh(
-      new PlaneGeometry(PARKING_LOT.maxX - PARKING_LOT.minX, PARKING_LOT.maxZ - PARKING_LOT.minZ),
-      matte(COLOR.parking),
-    );
-    surface.rotation.x = -Math.PI / 2;
-    surface.position.set(
+    this.slab(
       (PARKING_LOT.minX + PARKING_LOT.maxX) / 2,
-      LAYER_ROAD,
       (PARKING_LOT.minZ + PARKING_LOT.maxZ) / 2,
+      PARKING_LOT.maxX - PARKING_LOT.minX,
+      PARKING_LOT.maxZ - PARKING_LOT.minZ,
+      LAYER_ROAD,
+      COLOR.parking,
     );
-    surface.receiveShadow = true;
-    this.root.add(surface);
 
-    const lineMaterial = matte(COLOR.marking);
     for (const space of PARKING_LOT.spaces) {
       for (const side of [-2.2, 2.2]) {
-        const line = new Mesh(new PlaneGeometry(0.2, 5.6), lineMaterial);
-        line.rotation.x = -Math.PI / 2;
-        line.position.set(space.x + side, LAYER_MARKING, space.z);
-        this.root.add(line);
+        this.slab(space.x + side, space.z, 0.2, 5.6, LAYER_MARKING, COLOR.marking);
       }
     }
 
     // A short apron joining the lot to the road it hangs off.
-    const apron = new Mesh(new PlaneGeometry(4.5, 6), matte(COLOR.parking));
-    apron.rotation.x = -Math.PI / 2;
-    apron.position.set(PARKING_LOT.entrance.x - 2, LAYER_ROAD, PARKING_LOT.entrance.z);
-    apron.receiveShadow = true;
-    this.root.add(apron);
+    this.slab(
+      PARKING_LOT.entrance.x - 2,
+      PARKING_LOT.entrance.z,
+      4.5,
+      6,
+      LAYER_ROAD,
+      COLOR.parking,
+    );
   }
 
   /** Low beds of soil with a scatter of flowers on top. */
   private addFlowerBeds(): void {
     const rng = new Rng('flowers');
-    const soil = matte(COLOR.soil);
-
     for (const bed of FLOWER_BEDS) {
-      this.root.add(
-        flowerBed(bed.minX, bed.maxX, bed.minZ, bed.maxZ, soil, rng, new Object3D(), 0),
-      );
+      this.flowerBed(new Matrix4(), bed.minX, bed.maxX, bed.minZ, bed.maxZ, rng);
+    }
+  }
+
+  /**
+   * A bed of soil with flowers scattered over it, placed through `frame` so
+   * it works both in world space and inside a house's local space.
+   */
+  private flowerBed(
+    frame: Matrix4,
+    minX: number,
+    maxX: number,
+    minZ: number,
+    maxZ: number,
+    rng: Rng,
+  ): void {
+    const width = maxX - minX;
+    const depth = maxZ - minZ;
+
+    this.batch('box').add(
+      frame
+        .clone()
+        .multiply(
+          composeMatrix(
+            { x: (minX + maxX) / 2, y: 0.15, z: (minZ + maxZ) / 2 },
+            {},
+            { x: width, y: 0.3, z: depth },
+          ),
+        ),
+      COLOR.soil,
+    );
+
+    const count = Math.max(3, Math.round(width * depth * 0.9));
+    const sphere = this.batch('sphere');
+    for (let index = 0; index < count; index += 1) {
+      const x = rng.nextFloat(minX + 0.25, maxX - 0.25);
+      const z = rng.nextFloat(minZ + 0.25, maxZ - 0.25);
+      const size = rng.nextFloat(0.7, 1.2) * 0.17;
+      const color = rng.pick(FLOWER_COLORS);
+      sphere.add(frame.clone().multiply(composeMatrix({ x, y: 0.36, z }, {}, size)), color);
     }
   }
 
   private addShrubs(): void {
     const rng = new Rng('shrubs');
+    const shrubs = this.batch('shrub');
     for (const shrub of SHRUBS) {
-      const blob = new Mesh(
-        new IcosahedronGeometry(shrub.radius, 1),
-        matte(new Color(COLOR.foliage).offsetHSL(0, rng.nextFloat(-0.05, 0.05), -0.04).getHex()),
+      const color = new Color(COLOR.foliage).offsetHSL(0, rng.nextFloat(-0.05, 0.05), -0.04);
+      shrubs.place(
+        { x: shrub.position.x, y: shrub.radius * 0.55, z: shrub.position.z },
+        {},
+        { x: shrub.radius, y: shrub.radius * 0.72, z: shrub.radius },
+        color,
       );
-      blob.position.set(shrub.position.x, shrub.radius * 0.55, shrub.position.z);
-      blob.scale.set(1, 0.72, 1);
-      blob.castShadow = true;
-      this.root.add(blob);
     }
   }
 
   private addBuilding(building: Building): void {
-    const group = new Group();
-    group.position.set(building.position.x, 0, building.position.z);
-    group.rotation.y = building.rotationY;
-    group.name = building.id;
+    // The walls and roof are meshes of their own; everything else on the
+    // building goes into the shared batches through this frame.
+    const frame = composeMatrix(
+      { x: building.position.x, y: 0, z: building.position.z },
+      { y: building.rotationY },
+    );
 
-    const wallMaterial = matte(jitter(wallColor(building), building.id));
     const walls = new Mesh(
       new RoundedBoxGeometry(building.width, building.wallHeight, building.depth, 3, ROUNDING),
-      wallMaterial,
+      matte(jitter(wallColor(building), building.id)),
     );
-    walls.position.y = building.wallHeight / 2;
+    walls.position.set(building.position.x, building.wallHeight / 2, building.position.z);
+    walls.rotation.y = building.rotationY;
     walls.castShadow = true;
     walls.receiveShadow = true;
-    group.add(walls);
+    walls.name = building.id;
+    this.root.add(walls);
 
-    group.add(roofFor(building));
-    this.addRoofTrim(group, building);
+    const roof = roofFor(building);
+    roof.applyMatrix4(frame);
+    this.root.add(roof);
 
-    const windowMaterial = new MeshStandardMaterial({
-      color: COLOR.glass,
-      emissive: new Color(WINDOW_EMISSIVE),
-      emissiveIntensity: 0,
-      roughness: 0.55,
-      metalness: 0,
-      side: DoubleSide,
-    });
-    const frameMaterial = matte(building.style?.trimColor ?? COLOR.ivory);
+    this.addRoofTrim(frame, building);
 
-    const windowGlows: Sprite[] = [];
+    const lights: BuildingLights = {
+      building,
+      paneIndices: [],
+      glowIndices: [],
+      lit: 0,
+      written: -1,
+    };
+    const trimColor = building.style?.trimColor ?? COLOR.ivory;
+
     for (const placement of windowPlacements(building)) {
-      const frame = new Mesh(
-        new BoxGeometry(placement.width + 0.24, placement.height + 0.24, 0.12),
-        frameMaterial,
+      const rotation = { y: placement.rotationY };
+      const nx = placement.normalX;
+      const nz = placement.normalZ;
+
+      this.batch('windowFrame').add(
+        frame.clone().multiply(
+          composeMatrix({ x: placement.x, y: placement.y, z: placement.z }, rotation, {
+            x: placement.width + 0.24,
+            y: placement.height + 0.24,
+            z: 0.12,
+          }),
+        ),
+        trimColor,
       );
-      frame.position.set(placement.x, placement.y, placement.z);
-      frame.rotation.y = placement.rotationY;
-      group.add(frame);
 
       // A sill below each window: a small ledge that catches light and shadow.
-      const sill = new Mesh(new BoxGeometry(placement.width + 0.4, 0.1, 0.28), frameMaterial);
-      sill.position.set(
-        placement.x + placement.normalX * 0.1,
-        placement.y - placement.height / 2 - 0.12,
-        placement.z + placement.normalZ * 0.1,
+      this.batch('windowSill').add(
+        frame.clone().multiply(
+          composeMatrix(
+            {
+              x: placement.x + nx * 0.1,
+              y: placement.y - placement.height / 2 - 0.12,
+              z: placement.z + nz * 0.1,
+            },
+            rotation,
+            { x: placement.width + 0.4, y: 0.1, z: 0.28 },
+          ),
+        ),
+        trimColor,
       );
-      sill.rotation.y = placement.rotationY;
-      sill.castShadow = true;
-      group.add(sill);
 
-      const pane = new Mesh(new PlaneGeometry(placement.width, placement.height), windowMaterial);
-      pane.position.set(
-        placement.x + placement.normalX * 0.07,
-        placement.y,
-        placement.z + placement.normalZ * 0.07,
+      lights.paneIndices.push(
+        this.batch('windowPane').add(
+          frame
+            .clone()
+            .multiply(
+              composeMatrix(
+                { x: placement.x + nx * 0.07, y: placement.y, z: placement.z + nz * 0.07 },
+                rotation,
+                { x: placement.width, y: placement.height, z: 1 },
+              ),
+            ),
+          new Color(0, 0, 0),
+        ),
       );
-      pane.rotation.y = placement.rotationY;
-      group.add(pane);
 
-      const glow = createGlowSprite(WINDOW_EMISSIVE, Math.max(placement.width, 1.1) * 2.4);
-      glow.position.set(
-        placement.x + placement.normalX * 0.4,
+      const glowPosition = new Vector3(
+        placement.x + nx * GLOW_OFFSET,
         placement.y,
-        placement.z + placement.normalZ * 0.4,
+        placement.z + nz * GLOW_OFFSET,
+      ).applyMatrix4(frame);
+      const glowScale = Math.max(placement.width, 1.1) * GLOW_SCALE;
+      lights.glowIndices.push(
+        this.batch('windowGlow').add(
+          composeMatrix(glowPosition, {}, glowScale),
+          new Color(0, 0, 0),
+        ),
       );
-      group.add(glow);
-      windowGlows.push(glow);
+      this.windowGlowBillboards.push({ position: glowPosition, scale: glowScale });
     }
 
-    this.addDoorAndTrim(group, building);
+    this.addDoorAndTrim(frame, building);
     if (building.style) {
-      this.addYard(group, building, building.style);
+      this.addYard(frame, building, building.style);
     }
 
-    this.root.add(group);
-    this.buildingViews.push({ building, windowMaterial, windowGlows, lit: 0 });
+    this.buildingLights.push(lights);
+  }
+
+  /**
+   * What sits on and under a roof: a fascia board along the eaves, a ridge
+   * cap on a pitched roof, and a chimney on every other house. Small parts,
+   * but they are what make a roof look assembled rather than extruded.
+   */
+  private addRoofTrim(frame: Matrix4, building: Building): void {
+    const style = building.style;
+    const trimColor = style?.trimColor ?? COLOR.ivory;
+    const pitched =
+      style?.roofKind === 'gable' || style?.roofKind === 'hip' || building.kind === 'bakery';
+
+    if (pitched) {
+      this.batch('box').add(
+        frame
+          .clone()
+          .multiply(
+            composeMatrix(
+              { x: 0, y: building.wallHeight - 0.04, z: 0 },
+              {},
+              { x: building.width + 1.1, y: 0.22, z: building.depth + 1.1 },
+            ),
+          ),
+        trimColor,
+      );
+    }
+
+    if (style?.roofKind === 'gable') {
+      this.batch('roundedBox').add(
+        frame
+          .clone()
+          .multiply(
+            composeMatrix(
+              { x: 0, y: building.wallHeight + building.roofHeight - 0.02, z: 0 },
+              {},
+              { x: 0.34, y: 0.22, z: building.depth + 1.2 },
+            ),
+          ),
+        darken(style.roofColor, 0.82),
+      );
+    }
+
+    const houseNumber = Number(building.id.slice(-2));
+    if (building.kind === 'house' && pitched && houseNumber % 2 === 0) {
+      // Off centre and towards the back, so it clears the ridge.
+      const chimney = {
+        x: building.width * 0.28,
+        y: building.wallHeight + building.roofHeight * 0.55 + 0.5,
+        z: -building.depth * 0.18,
+      };
+      this.batch('roundedBox').add(
+        frame.clone().multiply(composeMatrix(chimney, {}, { x: 0.7, y: 1.6, z: 0.7 })),
+        darken(style?.wallColor ?? COLOR.ivory, 0.8),
+      );
+      this.batch('cylinder').add(
+        frame
+          .clone()
+          .multiply(
+            composeMatrix(
+              { x: chimney.x, y: chimney.y + 0.95, z: chimney.z },
+              {},
+              { x: 0.16, y: 0.4, z: 0.16 },
+            ),
+          ),
+        0x8a5a48,
+      );
+    }
   }
 
   /** A door on the front wall, plus whatever marks the building out. */
-  private addDoorAndTrim(group: Group, building: Building): void {
+  private addDoorAndTrim(frame: Matrix4, building: Building): void {
     const doorHeight = 2.2;
     const doorWidth = building.kind === 'house' ? 1.2 : 2.2;
-    const door = new Mesh(
-      new RoundedBoxGeometry(doorWidth, doorHeight, 0.16, 2, 0.05),
-      matte(building.style?.trimColor === COLOR.ivory ? COLOR.wood : 0x5a4636),
-    );
-    door.position.set(0, doorHeight / 2, building.depth / 2 + 0.06);
-    group.add(door);
+    const front = building.depth / 2;
+    const rounded = this.batch('roundedBox');
+    const at = (position: Placement, scale: Scale, rotation = {}): Matrix4 =>
+      frame.clone().multiply(composeMatrix(position, rotation, scale));
 
-    const step = new Mesh(
-      new RoundedBoxGeometry(doorWidth + 0.8, 0.16, 0.9, 2, 0.05),
-      matte(COLOR.pavement),
+    rounded.add(
+      at({ x: 0, y: doorHeight / 2, z: front + 0.06 }, { x: doorWidth, y: doorHeight, z: 0.16 }),
+      building.style?.trimColor === COLOR.ivory ? COLOR.wood : 0x5a4636,
     );
-    step.position.set(0, 0.08, building.depth / 2 + 0.5);
-    step.receiveShadow = true;
-    group.add(step);
+
+    rounded.add(
+      at({ x: 0, y: 0.08, z: front + 0.5 }, { x: doorWidth + 0.8, y: 0.16, z: 0.9 }),
+      COLOR.pavement,
+    );
 
     if (building.kind === 'cafe' || building.kind === 'bakery') {
-      const awning = new Mesh(
-        new RoundedBoxGeometry(building.width * 0.72, 0.22, 2.4, 2, 0.08),
-        matte(building.kind === 'cafe' ? COLOR.awningCafe : COLOR.awningBakery),
+      rounded.add(
+        at(
+          { x: 0, y: doorHeight + 0.9, z: front + 1 },
+          { x: building.width * 0.72, y: 0.22, z: 2.4 },
+        ),
+        building.kind === 'cafe' ? COLOR.awningCafe : COLOR.awningBakery,
       );
-      awning.position.set(0, doorHeight + 0.9, building.depth / 2 + 1);
-      awning.castShadow = true;
-      group.add(awning);
     }
 
     if (building.kind === 'apartment') {
-      const canopy = new Mesh(new RoundedBoxGeometry(3.4, 0.2, 1.6, 2, 0.06), matte(COLOR.ivory));
-      canopy.position.set(0, doorHeight + 0.5, building.depth / 2 + 0.7);
-      canopy.castShadow = true;
-      group.add(canopy);
+      rounded.add(
+        at({ x: 0, y: doorHeight + 0.5, z: front + 0.7 }, { x: 3.4, y: 0.2, z: 1.6 }),
+        COLOR.ivory,
+      );
     }
 
     if (building.kind === 'school') {
       // A little bell tower, so the school is recognisable from above.
-      const tower = new Mesh(new RoundedBoxGeometry(3, 3.4, 3, 2, 0.2), matte(COLOR.ivory));
-      tower.position.set(0, building.wallHeight + 1.7, 0);
-      tower.castShadow = true;
-      group.add(tower);
-
-      const cap = new Mesh(new ConeGeometry(2.4, 2, 4), matte(0x8a6a52));
-      cap.position.set(0, building.wallHeight + 4.4, 0);
-      cap.rotation.y = Math.PI / 4;
-      cap.castShadow = true;
-      group.add(cap);
+      rounded.add(
+        at({ x: 0, y: building.wallHeight + 1.7, z: 0 }, { x: 3, y: 3.4, z: 3 }),
+        COLOR.ivory,
+      );
+      this.batch('cone').add(
+        at(
+          { x: 0, y: building.wallHeight + 4.4, z: 0 },
+          { x: 2.4, y: 2, z: 2.4 },
+          { y: Math.PI / 4 },
+        ),
+        0x8a6a52,
+      );
     }
 
     if (building.kind === 'supermarket') {
+      // The one lit sign in town keeps its own material.
       const sign = new Mesh(
         new RoundedBoxGeometry(building.width * 0.6, 1.3, 0.3, 2, 0.1),
         new MeshStandardMaterial({
@@ -593,59 +829,8 @@ export class TownView {
           roughness: 0.8,
         }),
       );
-      sign.position.set(0, building.wallHeight - 1.4, building.depth / 2 + 0.15);
-      group.add(sign);
-    }
-  }
-
-  /**
-   * What sits on and under a roof: a fascia board along the eaves, a ridge
-   * cap on a pitched roof, and a chimney on every other house. Small parts,
-   * but they are what make a roof look assembled rather than extruded.
-   */
-  private addRoofTrim(group: Group, building: Building): void {
-    const style = building.style;
-    const trim = matte(style?.trimColor ?? COLOR.ivory);
-    const pitched =
-      style?.roofKind === 'gable' || style?.roofKind === 'hip' || building.kind === 'bakery';
-
-    if (pitched) {
-      const fascia = new Mesh(
-        new BoxGeometry(building.width + 1.1, 0.22, building.depth + 1.1),
-        trim,
-      );
-      fascia.position.y = building.wallHeight - 0.04;
-      fascia.castShadow = true;
-      group.add(fascia);
-    }
-
-    if (style?.roofKind === 'gable') {
-      const ridge = new Mesh(
-        new RoundedBoxGeometry(0.34, 0.22, building.depth + 1.2, 2, 0.08),
-        matte(darken(style.roofColor, 0.82)),
-      );
-      ridge.position.y = building.wallHeight + building.roofHeight - 0.02;
-      group.add(ridge);
-    }
-
-    const houseNumber = Number(building.id.slice(-2));
-    if (building.kind === 'house' && pitched && houseNumber % 2 === 0) {
-      const chimney = new Mesh(
-        new RoundedBoxGeometry(0.7, 1.6, 0.7, 2, 0.08),
-        matte(darken(style?.wallColor ?? COLOR.ivory, 0.8)),
-      );
-      // Off centre and towards the back, so it clears the ridge.
-      chimney.position.set(
-        building.width * 0.28,
-        building.wallHeight + building.roofHeight * 0.55 + 0.5,
-        -building.depth * 0.18,
-      );
-      chimney.castShadow = true;
-      group.add(chimney);
-
-      const pot = new Mesh(new CylinderGeometry(0.16, 0.16, 0.4, 10), matte(0x8a5a48));
-      pot.position.set(chimney.position.x, chimney.position.y + 0.95, chimney.position.z);
-      group.add(pot);
+      sign.applyMatrix4(at({ x: 0, y: building.wallHeight - 1.4, z: front + 0.15 }, 1));
+      this.root.add(sign);
     }
   }
 
@@ -654,140 +839,109 @@ export class TownView {
    * own home (DESIGN.md §4). Everything is placed in the house's local space,
    * in front of its door: +Z is the street side.
    */
-  private addYard(group: Group, building: Building, style: HouseStyle): void {
+  private addYard(frame: Matrix4, building: Building, style: HouseStyle): void {
     const front = building.depth / 2;
-    const trim = matte(style.trimColor);
+    const at = (position: Placement, scale: Scale, rotation = {}): Matrix4 =>
+      frame.clone().multiply(composeMatrix(position, rotation, scale));
+    const box = this.batch('box');
+    const rounded = this.batch('roundedBox');
+    const cylinder = this.batch('cylinder');
 
     if (style.porch) {
-      const deck = new Mesh(new RoundedBoxGeometry(building.width * 0.55, 0.2, 2, 2, 0.06), trim);
-      deck.position.set(0, 0.1, front + 1);
-      deck.receiveShadow = true;
-      group.add(deck);
-
-      for (const side of [-1, 1]) {
-        const post = new Mesh(new CylinderGeometry(0.09, 0.09, 2.5, 8), trim);
-        post.position.set(side * (building.width * 0.27 - 0.2), 1.45, front + 1.8);
-        post.castShadow = true;
-        group.add(post);
-      }
-      const canopy = new Mesh(
-        new RoundedBoxGeometry(building.width * 0.6, 0.18, 2.3, 2, 0.06),
-        matte(style.roofColor),
+      rounded.add(
+        at({ x: 0, y: 0.1, z: front + 1 }, { x: building.width * 0.55, y: 0.2, z: 2 }),
+        style.trimColor,
       );
-      canopy.position.set(0, 2.75, front + 1);
-      canopy.castShadow = true;
-      group.add(canopy);
+      for (const side of [-1, 1]) {
+        cylinder.add(
+          at(
+            { x: side * (building.width * 0.27 - 0.2), y: 1.45, z: front + 1.8 },
+            { x: 0.09, y: 2.5, z: 0.09 },
+          ),
+          style.trimColor,
+        );
+      }
+      rounded.add(
+        at({ x: 0, y: 2.75, z: front + 1 }, { x: building.width * 0.6, y: 0.18, z: 2.3 }),
+        style.roofColor,
+      );
     }
 
     if (style.balcony) {
       const floorHeight = building.wallHeight / building.floors;
       const y = floorHeight * 1.05;
-      const deck = new Mesh(new RoundedBoxGeometry(3.2, 0.18, 1.2, 2, 0.05), trim);
-      deck.position.set(building.width * 0.22, y, front + 0.6);
-      deck.castShadow = true;
-      group.add(deck);
-
-      const rail = new Mesh(new BoxGeometry(3.2, 0.7, 0.08), trim);
-      rail.position.set(building.width * 0.22, y + 0.45, front + 1.16);
-      group.add(rail);
+      rounded.add(
+        at({ x: building.width * 0.22, y, z: front + 0.6 }, { x: 3.2, y: 0.18, z: 1.2 }),
+        style.trimColor,
+      );
+      box.add(
+        at({ x: building.width * 0.22, y: y + 0.45, z: front + 1.16 }, { x: 3.2, y: 0.7, z: 0.08 }),
+        style.trimColor,
+      );
     }
 
     if (style.fence) {
       const fenceZ = front + 3.6;
       const halfWidth = building.width / 2 + 1;
-      const rail = new Mesh(new BoxGeometry(halfWidth * 2, 0.08, 0.08), matte(COLOR.wood));
-      rail.position.set(0, 0.55, fenceZ);
-      group.add(rail);
-
+      box.add(at({ x: 0, y: 0.55, z: fenceZ }, { x: halfWidth * 2, y: 0.08, z: 0.08 }), COLOR.wood);
       const postCount = Math.round(halfWidth * 2);
-      const posts = new InstancedMesh(
-        new BoxGeometry(0.12, 0.8, 0.12),
-        matte(COLOR.wood),
-        postCount,
-      );
-      posts.castShadow = true;
-      const placement = new Object3D();
       for (let index = 0; index < postCount; index += 1) {
         // Leave the middle open as a gate.
         const x = -halfWidth + (index / (postCount - 1)) * halfWidth * 2;
-        placement.position.set(x, 0.4, fenceZ);
-        placement.scale.setScalar(Math.abs(x) < 0.8 ? 0.001 : 1);
-        placement.updateMatrix();
-        posts.setMatrixAt(index, placement.matrix);
+        if (Math.abs(x) < 0.8) {
+          continue;
+        }
+        box.add(at({ x, y: 0.4, z: fenceZ }, { x: 0.12, y: 0.8, z: 0.12 }), COLOR.wood);
       }
-      posts.instanceMatrix.needsUpdate = true;
-      group.add(posts);
     }
 
     if (style.flowerBed) {
       const rng = new Rng(`${building.id}:flowers`);
       const bedWidth = building.width * 0.38;
-      group.add(
-        flowerBed(
-          building.width / 2 - bedWidth - 0.2,
-          building.width / 2 - 0.2,
-          front + 0.35,
-          front + 1.15,
-          matte(COLOR.soil),
-          rng,
-          new Object3D(),
-          0,
-        ),
+      this.flowerBed(
+        frame,
+        building.width / 2 - bedWidth - 0.2,
+        building.width / 2 - 0.2,
+        front + 0.35,
+        front + 1.15,
+        rng,
       );
     }
 
     const propX = -(building.width / 2 - 0.9);
     const propZ = front + 2.6;
     switch (style.prop) {
-      case 'mailbox': {
-        const post = new Mesh(new CylinderGeometry(0.06, 0.06, 1.1, 6), matte(COLOR.ironwork));
-        post.position.set(propX, 0.55, propZ);
-        group.add(post);
-        const box = new Mesh(new RoundedBoxGeometry(0.34, 0.3, 0.5, 2, 0.08), matte(0xd97b6c));
-        box.position.set(propX, 1.2, propZ);
-        box.castShadow = true;
-        group.add(box);
+      case 'mailbox':
+        cylinder.add(
+          at({ x: propX, y: 0.55, z: propZ }, { x: 0.06, y: 1.1, z: 0.06 }),
+          COLOR.ironwork,
+        );
+        rounded.add(at({ x: propX, y: 1.2, z: propZ }, { x: 0.34, y: 0.3, z: 0.5 }), 0xd97b6c);
         break;
-      }
-      case 'bin': {
-        const bin = new Mesh(new CylinderGeometry(0.34, 0.3, 0.9, 10), matte(0x5f6b73));
-        bin.position.set(propX, 0.45, propZ);
-        bin.castShadow = true;
-        group.add(bin);
+      case 'bin':
+        cylinder.add(at({ x: propX, y: 0.45, z: propZ }, { x: 0.34, y: 0.9, z: 0.34 }), 0x5f6b73);
         break;
-      }
       case 'bicycle': {
-        const wheelMaterial = matte(COLOR.ironwork);
+        const blue = 0x5f8fb5;
         for (const offset of [-0.5, 0.5]) {
-          const wheel = new Mesh(new TorusGeometry(0.34, 0.05, 6, 16), wheelMaterial);
-          wheel.position.set(propX + offset, 0.36, propZ);
-          wheel.castShadow = true;
-          group.add(wheel);
+          this.batch('torus').add(at({ x: propX + offset, y: 0.36, z: propZ }, 1), COLOR.ironwork);
         }
-        const frame = new Mesh(new BoxGeometry(1.0, 0.06, 0.06), matte(0x5f8fb5));
-        frame.position.set(propX, 0.62, propZ);
-        group.add(frame);
-        const seatPost = new Mesh(new BoxGeometry(0.06, 0.4, 0.06), matte(0x5f8fb5));
-        seatPost.position.set(propX - 0.15, 0.8, propZ);
-        group.add(seatPost);
+        box.add(at({ x: propX, y: 0.62, z: propZ }, { x: 1.0, y: 0.06, z: 0.06 }), blue);
+        box.add(at({ x: propX - 0.15, y: 0.8, z: propZ }, { x: 0.06, y: 0.4, z: 0.06 }), blue);
         break;
       }
-      case 'flower-pots': {
-        const pot = matte(0xb8695a);
+      case 'flower-pots':
         for (const offset of [-0.5, 0, 0.5]) {
-          const pot1 = new Mesh(new CylinderGeometry(0.2, 0.15, 0.32, 10), pot);
-          pot1.position.set(propX + offset, 0.16, propZ);
-          pot1.castShadow = true;
-          group.add(pot1);
-          const bloom = new Mesh(
-            new SphereGeometry(0.2, 10, 8),
-            matte(FLOWER_COLORS[Math.abs(Math.round(offset * 2)) % FLOWER_COLORS.length]),
+          cylinder.add(
+            at({ x: propX + offset, y: 0.16, z: propZ }, { x: 0.2, y: 0.32, z: 0.2 }),
+            0xb8695a,
           );
-          bloom.position.set(propX + offset, 0.42, propZ);
-          group.add(bloom);
+          this.batch('sphere').add(
+            at({ x: propX + offset, y: 0.42, z: propZ }, 0.2),
+            FLOWER_COLORS[Math.abs(Math.round(offset * 2)) % FLOWER_COLORS.length],
+          );
         }
         break;
-      }
       case 'none':
         break;
     }
@@ -795,144 +949,188 @@ export class TownView {
 
   private addTrees(): void {
     const rng = new Rng('trees');
+    const trunks = this.batch('trunk');
+    const crowns = this.batch('crown');
+    const layers = this.batch('pineLayer');
 
     for (const tree of TREES) {
-      const group = new Group();
-      group.position.set(tree.position.x, 0, tree.position.z);
-      group.rotation.y = rng.nextFloat(0, Math.PI * 2);
-
+      const frame = composeMatrix(
+        { x: tree.position.x, y: 0, z: tree.position.z },
+        { y: rng.nextFloat(0, Math.PI * 2) },
+      );
       const trunkHeight = tree.height * 0.4;
-      const trunk = new Mesh(new CylinderGeometry(0.26, 0.4, trunkHeight, 8), matte(COLOR.trunk));
-      trunk.position.y = trunkHeight / 2;
-      trunk.castShadow = true;
-      group.add(trunk);
+      trunks.add(
+        frame
+          .clone()
+          .multiply(composeMatrix({ x: 0, y: trunkHeight / 2, z: 0 }, {}, { y: trunkHeight })),
+        COLOR.trunk,
+      );
 
       const base = tree.shape === 'pine' ? COLOR.pine : COLOR.foliage;
-      const foliageMaterial = matte(
-        new Color(base)
-          .offsetHSL(
-            rng.nextFloat(-0.025, 0.025),
-            rng.nextFloat(-0.06, 0.06),
-            rng.nextFloat(-0.05, 0.05),
-          )
-          .getHex(),
+      const color = new Color(base).offsetHSL(
+        rng.nextFloat(-0.025, 0.025),
+        rng.nextFloat(-0.06, 0.06),
+        rng.nextFloat(-0.05, 0.05),
       );
 
       if (tree.shape === 'pine') {
         for (let layer = 0; layer < 3; layer += 1) {
           const radius = 2.3 - layer * 0.55;
           const height = tree.height * 0.42;
-          const cone = new Mesh(new ConeGeometry(radius, height, 12), foliageMaterial);
-          cone.position.y = trunkHeight + layer * (tree.height * 0.2) + height / 2;
-          cone.castShadow = true;
-          group.add(cone);
+          layers.add(
+            frame
+              .clone()
+              .multiply(
+                composeMatrix(
+                  { x: 0, y: trunkHeight + layer * (tree.height * 0.2) + height / 2, z: 0 },
+                  {},
+                  { x: radius, y: height, z: radius },
+                ),
+              ),
+            color,
+          );
         }
       } else {
         // Two soft blobs, the upper one smaller, read as a round crown.
         const crownHeight = tree.height - trunkHeight;
-        const lower = new Mesh(new IcosahedronGeometry(crownHeight * 0.6, 1), foliageMaterial);
-        lower.position.y = trunkHeight + crownHeight * 0.42;
-        lower.scale.set(1, 0.85, 1);
-        lower.castShadow = true;
-        group.add(lower);
-
-        const upper = new Mesh(new IcosahedronGeometry(crownHeight * 0.42, 1), foliageMaterial);
-        upper.position.set(
-          crownHeight * 0.12,
-          trunkHeight + crownHeight * 0.78,
-          -crownHeight * 0.08,
+        const lower = crownHeight * 0.6;
+        crowns.add(
+          frame
+            .clone()
+            .multiply(
+              composeMatrix(
+                { x: 0, y: trunkHeight + crownHeight * 0.42, z: 0 },
+                {},
+                { x: lower, y: lower * 0.85, z: lower },
+              ),
+            ),
+          color,
         );
-        upper.castShadow = true;
-        group.add(upper);
+        crowns.add(
+          frame.clone().multiply(
+            composeMatrix(
+              {
+                x: crownHeight * 0.12,
+                y: trunkHeight + crownHeight * 0.78,
+                z: -crownHeight * 0.08,
+              },
+              {},
+              crownHeight * 0.42,
+            ),
+          ),
+          color,
+        );
       }
-
-      this.root.add(group);
     }
   }
 
   private addStreetLamps(): void {
-    const poleMaterial = matte(COLOR.ironwork);
-
     for (const position of streetLampPositions()) {
-      const group = new Group();
-      group.position.set(position.x, 0, position.z);
+      const { x, z } = position;
+      this.batch('lampPole').place({ x, y: STREET_LAMP_HEIGHT / 2, z }, {}, 1, COLOR.ironwork);
+      this.batch('lampHead').place({ x, y: STREET_LAMP_HEIGHT, z });
+      this.batch('lampBulb').place({ x, y: STREET_LAMP_HEIGHT - 0.22, z });
 
-      const pole = new Mesh(new CylinderGeometry(0.08, 0.12, STREET_LAMP_HEIGHT, 8), poleMaterial);
-      pole.position.y = STREET_LAMP_HEIGHT / 2;
-      pole.castShadow = true;
-      group.add(pole);
+      const haloPosition = new Vector3(x, STREET_LAMP_HEIGHT - 0.22, z);
+      this.batch('lampHalo').add(composeMatrix(haloPosition, {}, 3));
+      this.lampHaloBillboards.push({ position: haloPosition, scale: 3 });
 
-      const head = new Mesh(new RoundedBoxGeometry(0.7, 0.24, 0.7, 2, 0.08), this.lampMaterial);
-      head.position.y = STREET_LAMP_HEIGHT;
-      group.add(head);
-
-      const bulb = new Mesh(new SphereGeometry(0.22, 10, 8), this.lampMaterial);
-      bulb.position.y = STREET_LAMP_HEIGHT - 0.22;
-      group.add(bulb);
-
-      const halo = createGlowSprite(LAMP_EMISSIVE, 3);
-      halo.position.y = STREET_LAMP_HEIGHT - 0.22;
-      group.add(halo);
-      this.lampGlowSprites.push(halo);
-
-      const pool = new Mesh(new PlaneGeometry(9, 9), this.lampPoolMaterial);
-      pool.rotation.x = -Math.PI / 2;
-      pool.position.y = PAVEMENT_HEIGHT + 0.04;
-      group.add(pool);
-
-      this.root.add(group);
+      this.batch('lampPool').place({ x, y: PAVEMENT_HEIGHT + 0.04, z }, {}, { x: 9, z: 9 });
     }
   }
 
   private addStreetSigns(): void {
-    const postMaterial = matte(COLOR.ironwork);
-    const plateMaterial = matte(COLOR.ivory);
-
     for (const sign of STREET_SIGNS) {
-      const group = new Group();
-      group.position.set(sign.position.x, 0, sign.position.z);
-      group.rotation.y = sign.rotationY;
-
-      const post = new Mesh(new CylinderGeometry(0.06, 0.06, 2.6, 8), postMaterial);
-      post.position.y = 1.3;
-      post.castShadow = true;
-      group.add(post);
-
-      const plate = new Mesh(new RoundedBoxGeometry(2.2, 0.42, 0.08, 2, 0.04), plateMaterial);
-      plate.position.y = 2.5;
-      plate.castShadow = true;
-      group.add(plate);
-
-      this.root.add(group);
+      const frame = composeMatrix(
+        { x: sign.position.x, y: 0, z: sign.position.z },
+        { y: sign.rotationY },
+      );
+      this.batch('cylinder').add(
+        frame
+          .clone()
+          .multiply(composeMatrix({ x: 0, y: 1.3, z: 0 }, {}, { x: 0.06, y: 2.6, z: 0.06 })),
+        COLOR.ironwork,
+      );
+      this.batch('roundedBox').add(
+        frame
+          .clone()
+          .multiply(composeMatrix({ x: 0, y: 2.5, z: 0 }, {}, { x: 2.2, y: 0.42, z: 0.08 })),
+        COLOR.ivory,
+      );
     }
   }
 
   /**
-   * Eases every light towards where the simulation says it should be.
+   * Eases every light towards where the simulation says it should be, and
+   * turns the glow quads to face the camera.
    *
    * `deltaSeconds` is real time, so lights take the same moment to warm up
    * whatever speed the town is running at.
    */
-  update(world: World, environment: EnvironmentState, deltaSeconds: number): void {
+  update(world: World, environment: EnvironmentState, deltaSeconds: number, camera: Camera): void {
     const ease = 1 - Math.exp(-deltaSeconds / LIGHT_FADE_SECONDS);
+    const panes = this.batch('windowPane').built;
+    const glows = this.batch('windowGlow').built;
+    const warm = new Color(WINDOW_EMISSIVE);
+    const paneColor = new Color();
+    const glowColor = new Color();
+    let windowsChanged = false;
 
-    for (const view of this.buildingViews) {
-      const target = world.isLit(view.building.id) ? 1 : 0;
-      view.lit += (target - view.lit) * ease;
+    for (const lights of this.buildingLights) {
+      const target = world.isLit(lights.building.id) ? 1 : 0;
+      lights.lit += (target - lights.lit) * ease;
 
-      const shown = view.lit * environment.windowFactor;
-      view.windowMaterial.emissiveIntensity = shown * 1.15;
-      for (const glow of view.windowGlows) {
-        glow.material.opacity = shown * 0.42;
+      const shown = lights.lit * environment.windowFactor;
+      if (Math.abs(shown - lights.written) < 0.002) {
+        continue;
       }
+      lights.written = shown;
+      windowsChanged = true;
+
+      // The pane's red channel is its light amount; the glow is the warm
+      // colour scaled by it, which under additive blending is a fade.
+      paneColor.setRGB(shown * 1.15, 0, 0);
+      glowColor.copy(warm).multiplyScalar(shown);
+      for (const index of lights.paneIndices) {
+        panes.setColorAt(index, paneColor);
+      }
+      for (const index of lights.glowIndices) {
+        glows.setColorAt(index, glowColor);
+      }
+    }
+    if (windowsChanged && panes.instanceColor && glows.instanceColor) {
+      panes.instanceColor.needsUpdate = true;
+      glows.instanceColor.needsUpdate = true;
     }
 
     this.lampLit += (environment.lampFactor - this.lampLit) * ease;
     this.lampMaterial.emissiveIntensity = this.lampLit * 1.5;
     this.lampPoolMaterial.opacity = this.lampLit * 0.3;
-    for (const sprite of this.lampGlowSprites) {
-      sprite.material.opacity = this.lampLit * 0.36;
+    this.lampHaloMaterial.opacity = this.lampLit * 0.36;
+
+    this.faceCamera(camera);
+  }
+
+  /** Turns every glow quad to the camera, only when the camera has turned. */
+  private faceCamera(camera: Camera): void {
+    if (this.lastCameraQuaternion.equals(camera.quaternion)) {
+      return;
     }
+    this.lastCameraQuaternion.copy(camera.quaternion);
+
+    const turn = (mesh: InstancedMesh, billboards: Billboard[]): void => {
+      const scale = new Vector3();
+      const matrix = new Matrix4();
+      billboards.forEach((billboard, index) => {
+        scale.setScalar(billboard.scale);
+        matrix.compose(billboard.position, camera.quaternion, scale);
+        mesh.setMatrixAt(index, matrix);
+      });
+      mesh.instanceMatrix.needsUpdate = true;
+    };
+
+    turn(this.batch('windowGlow').built, this.windowGlowBillboards);
+    turn(this.batch('lampHalo').built, this.lampHaloBillboards);
   }
 }
 
@@ -1097,45 +1295,35 @@ function flatRoof(building: Building, color: number): Mesh {
 }
 
 /**
- * A bed of soil with flowers scattered over it. Returns a group so it can be
- * placed in world space or inside a house's local space alike.
+ * The window pane material. Instance colour is not a colour here: its red
+ * channel is how lit the window is, and the shader scales the emissive term
+ * by it while leaving the glass colour alone. That is what lets one
+ * InstancedMesh draw every window in town with each on or off by itself.
  */
-function flowerBed(
-  minX: number,
-  maxX: number,
-  minZ: number,
-  maxZ: number,
-  soil: MeshStandardMaterial,
-  rng: Rng,
-  placement: Object3D,
-  y: number,
-): Group {
-  const group = new Group();
-  const width = maxX - minX;
-  const depth = maxZ - minZ;
-
-  const bed = new Mesh(new RoundedBoxGeometry(width, 0.3, depth, 2, 0.08), soil);
-  bed.position.set((minX + maxX) / 2, y + 0.15, (minZ + maxZ) / 2);
-  bed.receiveShadow = true;
-  group.add(bed);
-
-  const count = Math.max(3, Math.round(width * depth * 0.9));
-  const blooms = new InstancedMesh(new SphereGeometry(0.17, 8, 6), matte(0xffffff), count);
-  for (let index = 0; index < count; index += 1) {
-    placement.position.set(
-      rng.nextFloat(minX + 0.25, maxX - 0.25),
-      y + 0.36,
-      rng.nextFloat(minZ + 0.25, maxZ - 0.25),
+function makePaneMaterial(): MeshStandardMaterial {
+  const material = new MeshStandardMaterial({
+    color: COLOR.glass,
+    emissive: new Color(WINDOW_EMISSIVE),
+    emissiveIntensity: 1,
+    roughness: 0.55,
+    metalness: 0,
+    side: DoubleSide,
+  });
+  material.onBeforeCompile = (shader) => {
+    shader.fragmentShader = shader.fragmentShader.replace('#include <color_fragment>', '').replace(
+      '#include <emissivemap_fragment>',
+      [
+        '#include <emissivemap_fragment>',
+        // USE_COLOR is what the fragment stage defines when instance
+        // colours are on; USE_INSTANCING_COLOR is a vertex stage define.
+        '#ifdef USE_COLOR',
+        '  totalEmissiveRadiance *= vColor.r;',
+        '#endif',
+      ].join('\n'),
     );
-    placement.scale.setScalar(rng.nextFloat(0.7, 1.2));
-    placement.updateMatrix();
-    blooms.setMatrixAt(index, placement.matrix);
-    blooms.setColorAt(index, new Color(rng.pick(FLOWER_COLORS)));
-  }
-  blooms.instanceMatrix.needsUpdate = true;
-  group.add(blooms);
-
-  return group;
+  };
+  material.customProgramCacheKey = () => 'tiny-town-window-pane';
+  return material;
 }
 
 /**
@@ -1207,16 +1395,9 @@ function matte(color: number): MeshStandardMaterial {
   return new MeshStandardMaterial({ color: new Color(color), roughness: 0.95, metalness: 0 });
 }
 
-/** A flat rectangle lying on the ground, oriented along a street's axis. */
-function slab(along: number, across: number, axis: 'x' | 'z'): PlaneGeometry {
-  const geometry =
-    axis === 'x' ? new PlaneGeometry(along, across) : new PlaneGeometry(across, along);
+/** A unit square lying flat on the ground, to be scaled into any slab. */
+function flatUnitPlane(): PlaneGeometry {
+  const geometry = new PlaneGeometry(1, 1);
   geometry.applyMatrix4(new Matrix4().makeRotationX(-Math.PI / 2));
   return geometry;
-}
-
-/** Where a slab sits for a street, offset sideways by `lateral`. */
-function slabPosition(street: Street, lateral: number, y: number): [number, number, number] {
-  const middle = (street.from + street.to) / 2;
-  return street.axis === 'x' ? [middle, y, street.at + lateral] : [street.at + lateral, y, middle];
 }

@@ -125,7 +125,7 @@ export class App {
 
     // Draw the town in its opening light before the first frame runs.
     this.environment.update(world.time.minuteOfDay);
-    this.townView.update(world, this.environment.state, 10);
+    this.townView.update(world, this.environment.state, 10, this.camera);
     this.citizenView.update(10);
 
     window.addEventListener('resize', this.handleResize);
@@ -280,7 +280,7 @@ export class App {
     this.world.tickMany(this.scheduler.ticksForFrame(deltaSeconds));
 
     this.environment.update(this.world.time.minuteOfDay);
-    this.townView.update(this.world, this.environment.state, deltaSeconds);
+    this.townView.update(this.world, this.environment.state, deltaSeconds, this.camera);
     this.citizenView.update(deltaSeconds);
 
     this.debugView?.update(this.world);

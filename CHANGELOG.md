@@ -1,5 +1,26 @@
 # Changelog
 
+## Phase 3.5 — Draw call refactor
+
+- `render/InstanceBatch.ts`: collects placements of one geometry and material and builds a
+  single `InstancedMesh` for all of them, colour per instance.
+- `TownView` rebuilt on it. Every repeated shape in the town is now one draw: window
+  frames, sills, panes and glows; lamp poles, heads, bulbs, haloes and pools; tree trunks,
+  crowns and pine layers; shrubs; flower beds and blooms; roof fascias, ridges, chimneys,
+  doors and steps; kerbs, road slabs, junction patches, markings and zone patches; yard
+  props, terrace furniture, park benches, street signs. Walls and roofs of the forty
+  buildings and the supermarket sign stay individual meshes.
+- Windows keep per-window lighting: the pane's instance colour carries its light amount in
+  the red channel and a small shader patch scales the emissive term by it, leaving the
+  glass colour alone. Glow quads and lamp haloes are instanced quads turned to the camera
+  whenever it moves, in place of sprites.
+- Draw calls 4,695 → 204 (renderer counter, main and shadow pass together). Triangles
+  498k → 543k, from the shared unit rounded box standing in for a few plain ones. Desktop
+  p95 frame time unchanged at about 18 ms on an M4 at 2x, which was never draw call bound;
+  the gain is for phones, where submission cost is.
+- Before/after screenshots at four moments and two framings differ in under 0.2% of
+  pixels at a loose threshold and under 0.02% at a strict one.
+
 ## Phase 3 — 60 citizens and the schedule system
 
 - `world/Population.ts`: sixty-three fixed citizens in thirty-three households, one per
