@@ -2,10 +2,14 @@ import {
   CapsuleGeometry,
   Color,
   Group,
-  Mesh,
+  InstancedMesh,
+  Matrix4,
   MeshStandardMaterial,
   Object3D,
+  Quaternion,
   SphereGeometry,
+  Vector3,
+  type Object3D as ThreeObject,
 } from 'three';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 
@@ -14,9 +18,8 @@ import { isOutside, isWalking } from '../entities/Citizen.js';
 import type { World } from '../simulation/World.js';
 
 /**
- * Body proportions, in metres. A little small in the body and a little large
- * in the head, as a figure from a model set is, but nowhere near chibi
- * (DESIGN.md §5).
+ * Body proportions, in metres, for a citizen of height 1. A little small in
+ * the body and a little large in the head, as a model figure is (DESIGN.md §5).
  */
 const LEG_LENGTH = 0.62;
 const LEG_RADIUS = 0.1;
@@ -28,10 +31,10 @@ const SHOULDER_HEIGHT = HIP_HEIGHT + TORSO_HEIGHT - 0.06;
 const ARM_LENGTH = 0.5;
 const ARM_RADIUS = 0.075;
 const HEAD_RADIUS = 0.24;
-const NECK = 0.04;
-const HEAD_CENTRE_Y = HIP_HEIGHT + TORSO_HEIGHT + NECK + HEAD_RADIUS;
+const HEAD_CENTRE_Y = HIP_HEIGHT + TORSO_HEIGHT + 0.04 + HEAD_RADIUS;
+const BAG_SIZE = 0.3;
 
-/** The walk: how far the legs swing, and how many radians of cycle per metre. */
+/** The walk: radians of stride per metre, and how far the limbs swing. */
 const STRIDE_RADIANS_PER_METRE = 3.4;
 const LEG_SWING = 0.55;
 const ARM_SWING = 0.4;
@@ -40,164 +43,211 @@ const BOB_HEIGHT = 0.035;
 /** How quickly the drawn position catches up with the simulated one. */
 const FOLLOW_SECONDS = 0.12;
 
-const SKIN_COLORS = [0xe9c2a0, 0xd5a27a, 0xf0d2b4, 0xa4704f, 0xc48b66];
-const HAIR_COLORS = [0x4a3627, 0x2b2320, 0xb58a5a, 0x8a6a4c, 0xd8c4a5, 0x5d5a58];
-const TROUSER_COLORS = [0x5c6572, 0x8b7d6b, 0x3f4a5c, 0x6f6a5f, 0x7c8a9a];
+/** The parts every citizen is made of, each an instanced mesh. */
+type Part = 'head' | 'hair' | 'torso' | 'leftArm' | 'rightArm' | 'leftLeg' | 'rightLeg' | 'bag';
 
-interface CitizenModel {
+interface Drawn {
   citizen: Citizen;
-  group: Group;
-  leftLeg: Object3D;
-  rightLeg: Object3D;
-  leftArm: Object3D;
-  rightArm: Object3D;
-  /** Drawn position, eased towards the simulated one so 1x looks smooth. */
   x: number;
   z: number;
   heading: number;
+  /** A phase offset so idle gestures are not in unison. */
+  idleOffset: number;
 }
 
 /**
- * The miniature people: head, hair, torso, two arms and two legs, each a
- * part that can move, so a walk is a walk and not a slide (DESIGN.md §5–6).
+ * The miniature people, drawn as instanced parts: one draw call per body part
+ * for the whole population, with a colour per instance (PHASES.md Phase 3).
  *
- * The simulation moves in fixed ticks, which at 1x is ten updates a second, so
- * the drawn position eases towards the simulated one instead of snapping to it
- * (SPEC.md 3.2: the renderer interpolates between ticks).
+ * The simulation moves in fixed ticks, so the drawn position eases towards the
+ * simulated one instead of snapping (SPEC.md 3.2). Limbs swing with the stride;
+ * standing citizens get small gestures by activity so nobody is a statue.
  */
 export class CitizenView {
   readonly root = new Group();
 
-  private readonly models: CitizenModel[] = [];
+  private readonly parts: Record<Part, InstancedMesh>;
+  private readonly drawn: Drawn[] = [];
+  private readonly scratch = new Object3D();
+  private readonly hidden = new Matrix4().makeScale(0, 0, 0);
+  private elapsed = 0;
 
   constructor(world: World) {
     this.root.name = 'citizens';
+    const count = world.citizens.length;
+    const matte = new MeshStandardMaterial({ roughness: 0.95, metalness: 0 });
+
+    const make = (geometry: InstancedMesh['geometry']): InstancedMesh => {
+      const mesh = new InstancedMesh(geometry, matte, count);
+      mesh.castShadow = true;
+      mesh.frustumCulled = false;
+      this.root.add(mesh);
+      return mesh;
+    };
+
+    this.parts = {
+      head: make(new SphereGeometry(HEAD_RADIUS, 16, 12)),
+      hair: make(new SphereGeometry(HEAD_RADIUS + 0.03, 16, 10, 0, Math.PI * 2, 0, Math.PI * 0.55)),
+      torso: make(new RoundedBoxGeometry(TORSO_WIDTH, TORSO_HEIGHT, TORSO_DEPTH, 3, 0.1)),
+      leftArm: make(limb(ARM_LENGTH, ARM_RADIUS)),
+      rightArm: make(limb(ARM_LENGTH, ARM_RADIUS)),
+      leftLeg: make(limb(LEG_LENGTH, LEG_RADIUS)),
+      rightLeg: make(limb(LEG_LENGTH, LEG_RADIUS)),
+      bag: make(new RoundedBoxGeometry(BAG_SIZE, BAG_SIZE * 1.1, 0.14, 2, 0.04)),
+    };
 
     world.citizens.forEach((citizen, index) => {
-      const model = buildFigure(citizen, index);
-      this.root.add(model.group);
-      this.models.push(model);
+      this.drawn.push({
+        citizen,
+        x: citizen.position.x,
+        z: citizen.position.z,
+        heading: citizen.heading,
+        idleOffset: index * 1.7,
+      });
+      const look = citizen.look;
+      this.parts.head.setColorAt(index, new Color(look.skin));
+      this.parts.hair.setColorAt(index, new Color(look.hair));
+      this.parts.torso.setColorAt(index, new Color(look.shirt));
+      this.parts.leftArm.setColorAt(index, new Color(look.shirt));
+      this.parts.rightArm.setColorAt(index, new Color(look.shirt));
+      this.parts.leftLeg.setColorAt(index, new Color(look.trousers));
+      this.parts.rightLeg.setColorAt(index, new Color(look.trousers));
+      this.parts.bag.setColorAt(index, new Color(0xd4b483));
     });
+    for (const mesh of Object.values(this.parts)) {
+      if (mesh.instanceColor) {
+        mesh.instanceColor.needsUpdate = true;
+      }
+    }
   }
 
   update(deltaSeconds: number): void {
+    this.elapsed += deltaSeconds;
     const ease = 1 - Math.exp(-deltaSeconds / FOLLOW_SECONDS);
 
-    for (const model of this.models) {
-      const { citizen, group } = model;
-      const outside = isOutside(citizen);
-      group.visible = outside;
-      if (!outside) {
+    this.drawn.forEach((drawn, index) => {
+      const { citizen } = drawn;
+      if (!isOutside(citizen)) {
         // Snap while hidden, so reappearing at the door does not slide.
-        model.x = citizen.position.x;
-        model.z = citizen.position.z;
-        continue;
+        drawn.x = citizen.position.x;
+        drawn.z = citizen.position.z;
+        for (const mesh of Object.values(this.parts)) {
+          mesh.setMatrixAt(index, this.hidden);
+        }
+        return;
       }
 
-      model.x += (citizen.position.x - model.x) * ease;
-      model.z += (citizen.position.z - model.z) * ease;
-      model.heading = easeAngle(model.heading, citizen.heading, ease);
+      drawn.x += (citizen.position.x - drawn.x) * ease;
+      drawn.z += (citizen.position.z - drawn.z) * ease;
+      drawn.heading = easeAngle(drawn.heading, citizen.heading, ease);
 
-      const walking = isWalking(citizen);
-      const phase = walking ? citizen.distanceWalked * STRIDE_RADIANS_PER_METRE : 0;
-      const swing = Math.sin(phase);
+      this.pose(index, drawn);
+    });
 
-      model.leftLeg.rotation.x = swing * LEG_SWING;
-      model.rightLeg.rotation.x = -swing * LEG_SWING;
-      model.leftArm.rotation.x = -swing * ARM_SWING;
-      model.rightArm.rotation.x = swing * ARM_SWING;
+    for (const mesh of Object.values(this.parts)) {
+      mesh.instanceMatrix.needsUpdate = true;
+    }
+  }
 
-      // The body rises as the legs pass each other, twice per cycle.
-      const bob = walking ? Math.abs(Math.cos(phase)) * BOB_HEIGHT : 0;
-      group.position.set(model.x, bob, model.z);
-      group.rotation.y = model.heading;
+  /** Writes the matrices of one citizen's parts for this frame. */
+  private pose(index: number, drawn: Drawn): void {
+    const { citizen } = drawn;
+    const scale = citizen.look.height;
+    const walking = isWalking(citizen);
+    const stride = walking ? citizen.distanceWalked * STRIDE_RADIANS_PER_METRE : 0;
+    const swing = Math.sin(stride);
+    const idle = this.elapsed + drawn.idleOffset;
+
+    // Small gestures by activity, so a standing figure still looks alive.
+    const legSwing = swing * LEG_SWING;
+    const armSwing = swing * ARM_SWING;
+    let armRaise = 0;
+    let headTurn = 0;
+    let bob = walking ? Math.abs(Math.cos(stride)) * BOB_HEIGHT : 0;
+    let showBag = false;
+
+    switch (citizen.activity) {
+      case 'Socialize':
+        headTurn = Math.sin(idle * 1.3) * 0.25;
+        armRaise = Math.max(0, Math.sin(idle * 2.1)) * 0.5;
+        bob = Math.abs(Math.sin(idle * 2.1)) * 0.01;
+        break;
+      case 'Relax':
+        headTurn = Math.sin(idle * 0.5) * 0.4;
+        break;
+      case 'Shop':
+        showBag = true;
+        armRaise = 0.15;
+        break;
+      case 'Eat':
+        armRaise = 0.6 + Math.sin(idle * 3) * 0.2;
+        break;
+      case 'Work':
+        armRaise = 0.35 + Math.sin(idle * 1.8) * 0.1;
+        break;
+      default:
+        break;
+    }
+
+    const base = new Matrix4()
+      .makeRotationY(drawn.heading)
+      .setPosition(drawn.x, bob * scale, drawn.z)
+      .multiply(new Matrix4().makeScale(scale, scale, scale));
+
+    const place = (part: Part, x: number, y: number, z: number, rotX = 0, rotY = 0): void => {
+      const local = new Matrix4().compose(
+        new Vector3(x, y, z),
+        new Quaternion().setFromEuler(this.scratch.rotation.set(rotX, rotY, 0)),
+        new Vector3(1, 1, 1),
+      );
+      this.parts[part].setMatrixAt(index, base.clone().multiply(local));
+    };
+
+    place('leftLeg', -0.12, HIP_HEIGHT, 0, legSwing);
+    place('rightLeg', 0.12, HIP_HEIGHT, 0, -legSwing);
+    place('torso', 0, HIP_HEIGHT + TORSO_HEIGHT / 2, 0);
+    place(
+      'leftArm',
+      -(TORSO_WIDTH / 2 + ARM_RADIUS + 0.02),
+      SHOULDER_HEIGHT,
+      0,
+      -armSwing - armRaise,
+    );
+    place('rightArm', TORSO_WIDTH / 2 + ARM_RADIUS + 0.02, SHOULDER_HEIGHT, 0, armSwing - armRaise);
+    place('head', 0, HEAD_CENTRE_Y, 0, 0, headTurn);
+
+    // The hair cap is a sphere segment; its length comes from the look.
+    const hair = new Matrix4().compose(
+      new Vector3(0, HEAD_CENTRE_Y + 0.01, 0),
+      new Quaternion().setFromEuler(this.scratch.rotation.set(0, Math.PI + headTurn, 0)),
+      new Vector3(1, citizen.look.hairCut / 0.55, 1),
+    );
+    this.parts.hair.setMatrixAt(index, base.clone().multiply(hair));
+
+    if (showBag) {
+      place('bag', TORSO_WIDTH / 2 + ARM_RADIUS + 0.06, SHOULDER_HEIGHT - ARM_LENGTH - 0.1, 0.02);
+    } else {
+      this.parts.bag.setMatrixAt(index, this.hidden);
     }
   }
 
   /** The drawn object for a citizen, used by camera follow in Phase 6. */
-  objectFor(citizenId: string): Object3D | undefined {
-    return this.models.find((model) => model.citizen.id === citizenId)?.group;
+  objectFor(citizenId: string): ThreeObject | undefined {
+    const index = this.drawn.findIndex((drawn) => drawn.citizen.id === citizenId);
+    if (index === -1) {
+      return undefined;
+    }
+    const anchor = new Object3D();
+    anchor.position.set(this.drawn[index].x, 0, this.drawn[index].z);
+    return anchor;
   }
 }
 
-/** One figure, standing at the origin of its group and facing +Z. */
-function buildFigure(citizen: Citizen, index: number): CitizenModel {
-  const group = new Group();
-  group.name = citizen.id;
-
-  const skin = matte(SKIN_COLORS[index % SKIN_COLORS.length]);
-  const shirt = matte(citizen.shirtColor);
-  const trousers = matte(TROUSER_COLORS[index % TROUSER_COLORS.length]);
-  const hair = matte(HAIR_COLORS[(index * 5) % HAIR_COLORS.length]);
-
-  const leftLeg = limb(LEG_LENGTH, LEG_RADIUS, trousers);
-  leftLeg.position.set(-0.12, HIP_HEIGHT, 0);
-  group.add(leftLeg);
-
-  const rightLeg = limb(LEG_LENGTH, LEG_RADIUS, trousers);
-  rightLeg.position.set(0.12, HIP_HEIGHT, 0);
-  group.add(rightLeg);
-
-  const torso = new Mesh(
-    new RoundedBoxGeometry(TORSO_WIDTH, TORSO_HEIGHT, TORSO_DEPTH, 3, 0.1),
-    shirt,
-  );
-  torso.position.y = HIP_HEIGHT + TORSO_HEIGHT / 2;
-  torso.castShadow = true;
-  group.add(torso);
-
-  const leftArm = limb(ARM_LENGTH, ARM_RADIUS, shirt);
-  leftArm.position.set(-(TORSO_WIDTH / 2 + ARM_RADIUS + 0.02), SHOULDER_HEIGHT, 0);
-  group.add(leftArm);
-
-  const rightArm = limb(ARM_LENGTH, ARM_RADIUS, shirt);
-  rightArm.position.set(TORSO_WIDTH / 2 + ARM_RADIUS + 0.02, SHOULDER_HEIGHT, 0);
-  group.add(rightArm);
-
-  const head = new Mesh(new SphereGeometry(HEAD_RADIUS, 16, 12), skin);
-  head.position.y = HEAD_CENTRE_Y;
-  head.castShadow = true;
-  group.add(head);
-
-  // A cap of hair: the top of a slightly larger sphere, with a different cut
-  // per person so silhouettes differ from above.
-  const cut = 0.5 + ((index * 3) % 4) * 0.08;
-  const hairCap = new Mesh(
-    new SphereGeometry(HEAD_RADIUS + 0.03, 16, 10, 0, Math.PI * 2, 0, Math.PI * cut),
-    hair,
-  );
-  hairCap.position.y = HEAD_CENTRE_Y + 0.01;
-  hairCap.rotation.y = Math.PI;
-  group.add(hairCap);
-
-  return {
-    citizen,
-    group,
-    leftLeg,
-    rightLeg,
-    leftArm,
-    rightArm,
-    x: citizen.position.x,
-    z: citizen.position.z,
-    heading: citizen.heading,
-  };
-}
-
-/**
- * A limb hanging from a pivot: the pivot sits at the joint and the capsule
- * hangs below it, so rotating the pivot swings the limb.
- */
-function limb(length: number, radius: number, material: MeshStandardMaterial): Object3D {
-  const pivot = new Object3D();
-  const mesh = new Mesh(new CapsuleGeometry(radius, length - radius * 2, 4, 8), material);
-  mesh.position.y = -length / 2;
-  mesh.castShadow = true;
-  pivot.add(mesh);
-  return pivot;
-}
-
-function matte(color: number): MeshStandardMaterial {
-  return new MeshStandardMaterial({ color: new Color(color), roughness: 0.95, metalness: 0 });
+/** A limb hanging from its joint: the geometry is shifted so y=0 is the pivot. */
+function limb(length: number, radius: number): CapsuleGeometry {
+  const geometry = new CapsuleGeometry(radius, length - radius * 2, 4, 8);
+  geometry.translate(0, -length / 2, 0);
+  return geometry;
 }
 
 /** Eases an angle the short way round the circle. */

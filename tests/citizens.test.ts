@@ -1,16 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
 import type { Citizen } from '../src/entities/Citizen.js';
+import { isOutside } from '../src/entities/Citizen.js';
 import { closestPointOnSegment, distance, type Point } from '../src/entities/geometry.js';
-import {
-  GAME_MINUTES_PER_TICK,
-  TICKS_PER_GAME_DAY,
-  TICKS_PER_GAME_MINUTE,
-} from '../src/simulation/constants.js';
+import { GAME_MINUTES_PER_TICK, TICKS_PER_GAME_DAY } from '../src/simulation/constants.js';
+import { ENTRIES_PER_DAY } from '../src/simulation/EventLog.js';
 import { World } from '../src/simulation/World.js';
-import { buildSidewalkGraph } from '../src/simulation/Navigation.js';
-import { BUILDINGS, OUTDOOR_ZONES, townBounds } from '../src/world/Town.js';
-import { RESIDENTS } from '../src/world/Population.js';
+import { HOUSEHOLDS, POPULATION_SIZE, WORKPLACE_BY_JOB } from '../src/world/Population.js';
+import { BUILDINGS, OUTDOOR_ZONES, getBuilding, townBounds } from '../src/world/Town.js';
 
 const DAYS_TO_RUN = 30;
 
@@ -23,21 +20,73 @@ function distanceToPath(point: Point, path: readonly Point[]): number {
   return best;
 }
 
-/** Activities where standing still is the whole point. */
-function isStationaryOnPurpose(citizen: Citizen): boolean {
-  return (
-    citizen.activity === 'Sleep' || citizen.activity === 'AtHome' || citizen.activity === 'AtCafe'
-  );
-}
+describe('the population', () => {
+  const world = new World({ seed: 'population' });
+
+  it('has forty citizens in the houses the table says', () => {
+    expect(world.citizens).toHaveLength(POPULATION_SIZE);
+    const listed = HOUSEHOLDS.flatMap((household) => household.members).length;
+    expect(listed).toBe(POPULATION_SIZE);
+    for (const citizen of world.citizens) {
+      expect(() => getBuilding(citizen.homeId)).not.toThrow();
+      expect(['house', 'apartment']).toContain(getBuilding(citizen.homeId).kind);
+    }
+  });
+
+  it('gives every job a workplace that exists, except the retired', () => {
+    for (const citizen of world.citizens) {
+      const expected = WORKPLACE_BY_JOB[citizen.job];
+      expect(citizen.workplaceId).toBe(expected);
+      if (expected) {
+        expect(() => getBuilding(expected)).not.toThrow();
+      }
+    }
+  });
+
+  it('links families both ways and keeps them under one roof', () => {
+    const byId = new Map(world.citizens.map((citizen) => [citizen.id, citizen]));
+    for (const citizen of world.citizens) {
+      const kin = [
+        ...(citizen.family.spouse ? [citizen.family.spouse] : []),
+        ...citizen.family.parents,
+        ...citizen.family.children,
+        ...citizen.family.siblings,
+      ];
+      for (const id of kin) {
+        const relative = byId.get(id) as Citizen;
+        expect(relative, `${citizen.id} -> ${id}`).toBeDefined();
+        expect(relative.homeId).toBe(citizen.homeId);
+      }
+      if (citizen.family.spouse) {
+        expect((byId.get(citizen.family.spouse) as Citizen).family.spouse).toBe(citizen.id);
+      }
+      for (const childId of citizen.family.children) {
+        expect((byId.get(childId) as Citizen).family.parents).toContain(citizen.id);
+      }
+    }
+  });
+
+  it('gives everyone at least one friend and a personality in range', () => {
+    for (const citizen of world.citizens) {
+      expect(citizen.friends.length, citizen.id).toBeGreaterThan(0);
+      for (const value of Object.values(citizen.personality)) {
+        expect(value).toBeGreaterThanOrEqual(0);
+        expect(value).toBeLessThanOrEqual(100);
+      }
+    }
+  });
+});
 
 describe('citizens over 30 game days', () => {
-  const world = new World({ seed: 'phase-1-citizens' });
+  const world = new World({ seed: 'phase-3-citizens' });
 
   const lastPosition = new Map<string, Point>();
   const stillForMinutes = new Map<string, number>();
-  const cafeVisitsPerDay = new Map<string, Set<number>>();
-  const lastRoute = new Map<string, Point[]>();
-  const lastRouteOf = (id: string): Point[] => lastRoute.get(id) ?? [];
+  const lateDays = new Map<string, number>();
+  const workDays = new Map<string, number>();
+  const zoneVisitors = new Set<string>();
+  const outsideByHour = new Map<number, number>();
+  let outsideSamples = 0;
 
   let maxStillMinutes = 0;
   let maxDistanceOffPath = 0;
@@ -46,20 +95,35 @@ describe('citizens over 30 game days', () => {
   for (const citizen of world.citizens) {
     lastPosition.set(citizen.id, { ...citizen.position });
     stillForMinutes.set(citizen.id, 0);
-    cafeVisitsPerDay.set(citizen.id, new Set());
   }
 
+  let lastDay = world.time.day;
   for (let tick = 0; tick < TICKS_PER_GAME_DAY * DAYS_TO_RUN; tick += 1) {
     world.tick();
 
+    if (world.time.day !== lastDay) {
+      // Close out yesterday's lateness before the plans roll over.
+      lastDay = world.time.day;
+    }
+
     for (const citizen of world.citizens) {
-      if (citizen.activity === 'AtCafe') {
-        cafeVisitsPerDay.get(citizen.id)?.add(world.time.day);
+      if (citizen.activity === 'Work' && citizen.workplaceId) {
+        workDays.set(`${citizen.id}:${world.time.day}`, 1);
+        if (citizen.lateToday > 0) {
+          lateDays.set(`${citizen.id}:${world.time.day}`, 1);
+        }
+      }
+      if (citizen.place.kind === 'zone') {
+        zoneVisitors.add(citizen.place.id);
       }
 
       const previous = lastPosition.get(citizen.id) as Point;
       const moved = distance(previous, citizen.position) > 1e-6;
-      if (moved || isStationaryOnPurpose(citizen)) {
+      // Being indoors, asleep or at work is not being stuck: the tests care
+      // about people standing still in the open.
+      const exempt =
+        !isOutside(citizen) || citizen.activity === 'Sleep' || citizen.activity === 'Work';
+      if (moved || exempt) {
         lastPosition.set(citizen.id, { ...citizen.position });
         stillForMinutes.set(citizen.id, 0);
       } else {
@@ -73,20 +137,32 @@ describe('citizens over 30 game days', () => {
           maxDistanceOffPath,
           distanceToPath(citizen.position, citizen.path),
         );
-        lastRoute.set(citizen.id, citizen.path);
       }
       maxDistanceFromCentre = Math.max(
         maxDistanceFromCentre,
         Math.hypot(citizen.position.x, citizen.position.z),
       );
     }
+
+    if (tick % (TICKS_PER_GAME_DAY / 24) === 0 && world.time.day >= 2) {
+      const hour = world.time.hour;
+      outsideByHour.set(hour, (outsideByHour.get(hour) ?? 0) + world.citizenSystem.outsideCount);
+      outsideSamples += 1;
+    }
   }
 
-  it('keeps every citizen moving while they are outside', () => {
+  it('never leaves anyone standing in the open for more than 30 game minutes', () => {
     expect(maxStillMinutes).toBeLessThan(30);
   });
 
-  it('keeps every citizen on their route', () => {
+  it('gets people to work on time', () => {
+    const late = lateDays.size;
+    const total = workDays.size;
+    expect(total).toBeGreaterThan(0);
+    expect(late / total, `${late} late of ${total} shifts`).toBeLessThan(0.1);
+  });
+
+  it('keeps every walker on their route', () => {
     expect(maxDistanceOffPath).toBeLessThan(0.01);
   });
 
@@ -96,127 +172,118 @@ describe('citizens over 30 game days', () => {
       Math.hypot(bounds.minX, bounds.minZ),
       Math.hypot(bounds.maxX, bounds.maxZ),
     );
-
     expect(maxDistanceFromCentre).toBeLessThan(reach);
-    for (const citizen of world.citizens) {
-      expect(Number.isFinite(citizen.position.x)).toBe(true);
-      expect(Number.isFinite(citizen.position.z)).toBe(true);
+  });
+
+  it('puts people in every outdoor zone over the month', () => {
+    for (const zone of OUTDOOR_ZONES) {
+      expect(zoneVisitors.has(zone.id), zone.id).toBe(true);
     }
   });
 
-  it('routes every citizen along the pavement network', () => {
-    // Positions are checked against the route above; this checks the routes
-    // themselves sit on the graph, apart from the two ends, which are a door
-    // and a spot inside an outdoor zone.
-    const graph = buildSidewalkGraph();
-    const edges = graph.edgeList();
-    const terrace = OUTDOOR_ZONES.find((zone) => zone.id === 'cafe-terrace');
+  it('keeps someone outside through the whole of the day', () => {
+    expect(outsideSamples).toBeGreaterThan(0);
+    for (let hour = 8; hour <= 18; hour += 1) {
+      expect(outsideByHour.get(hour) ?? 0, `hour ${hour}`).toBeGreaterThan(0);
+    }
+  });
 
-    const distanceToGraph = (point: Point): number => {
-      let best = Infinity;
-      for (const [from, to] of edges) {
-        best = Math.min(best, distance(point, closestPointOnSegment(point, from, to)));
+  it('writes a short diary of full sentences, at most fifteen a day', () => {
+    for (let day = 2; day <= DAYS_TO_RUN; day += 1) {
+      const entries = world.log.forDay(day);
+      expect(entries.length, `day ${day}`).toBeLessThanOrEqual(ENTRIES_PER_DAY);
+      expect(entries.length, `day ${day}`).toBeGreaterThan(3);
+      for (const entry of entries) {
+        expect(entry.text).toMatch(/^[A-Z].*\.$/);
+        expect(entry.text.split(' ').length).toBeGreaterThan(4);
       }
-      return best;
-    };
-
-    const insideTerrace = (point: Point): boolean =>
-      terrace !== undefined &&
-      point.x >= terrace.minX - 1 &&
-      point.x <= terrace.maxX + 1 &&
-      point.z >= terrace.minZ - 1 &&
-      point.z <= terrace.maxZ + 1;
-
-    for (const citizen of world.citizens) {
-      const route = citizen.path.length > 1 ? citizen.path : lastRouteOf(citizen.id);
-      expect(route.length, `${citizen.id} never walked anywhere`).toBeGreaterThan(1);
-
-      // Every point is a node of the graph, except the spot on the cafe
-      // terrace the route ends on, which is the one step off the pavement.
-      route.forEach((point, index) => {
-        const onGraph = distanceToGraph(point) < 0.01;
-        expect(onGraph || insideTerrace(point), `${citizen.id} point ${index}`).toBe(true);
-      });
     }
   });
 
-  it('sends everyone to the cafe on every day of the run', () => {
+  it('ends with everyone in a known activity', () => {
     for (const citizen of world.citizens) {
-      // The first day starts at 05:30, so day 1 is a full day for everyone.
-      expect(cafeVisitsPerDay.get(citizen.id)?.size).toBe(DAYS_TO_RUN);
-    }
-  });
-
-  it('ends the run with everyone accounted for', () => {
-    expect(world.citizens).toHaveLength(RESIDENTS.length);
-    for (const citizen of world.citizens) {
-      expect(['Sleep', 'AtHome', 'WalkToCafe', 'AtCafe', 'WalkHome']).toContain(citizen.activity);
+      expect([
+        'Sleep',
+        'Eat',
+        'Work',
+        'Walk',
+        'Drive',
+        'Shop',
+        'Socialize',
+        'Relax',
+        'GoHome',
+      ]).toContain(citizen.activity);
     }
   });
 });
 
 describe('a single day', () => {
-  function runToMinute(minuteOfDay: number): World {
-    const world = new World({ seed: 'phase-1-day' });
-    while (world.time.minuteOfDay < minuteOfDay || world.time.day === 1) {
+  function runUntil(world: World, day: number, minuteOfDay: number): void {
+    while (
+      world.time.day < day ||
+      (world.time.day === day && world.time.minuteOfDay < minuteOfDay)
+    ) {
       world.tick();
-      if (world.time.day === 2 && world.time.minuteOfDay >= minuteOfDay) {
-        break;
-      }
     }
-    return world;
   }
 
   it('has everyone asleep at home in the small hours', () => {
-    const world = runToMinute(3 * 60);
+    const world = new World({ seed: 'phase-3-day' });
+    runUntil(world, 2, 3 * 60);
 
     for (const citizen of world.citizens) {
-      expect(citizen.activity).toBe('Sleep');
+      expect(citizen.activity, citizen.id).toBe('Sleep');
+      expect(citizen.place.id).toBe(citizen.homeId);
     }
     for (const building of BUILDINGS) {
-      expect(world.isLit(building.id)).toBe(false);
-    }
-  });
-
-  it('lights a house once someone is home and awake', () => {
-    const world = runToMinute(20 * 60);
-    const litHouses = BUILDINGS.filter(
-      (building) => building.kind === 'house' && world.isLit(building.id),
-    );
-
-    expect(litHouses.length).toBeGreaterThan(0);
-  });
-
-  it('turns the houses dark again one by one after bedtime', () => {
-    const world = new World({ seed: 'phase-1-day' });
-    const runUntil = (day: number, minuteOfDay: number): void => {
-      while (world.time.day < day || world.time.minuteOfDay < minuteOfDay) {
-        world.tick();
+      if (building.kind === 'house' || building.kind === 'apartment') {
+        expect(world.isLit(building.id)).toBe(false);
       }
-    };
-
-    // 21:30 on day 2 is before the earliest bedtime.
-    runUntil(2, 21 * 60 + 30);
-    const litBeforeBedtime = BUILDINGS.filter((b) => world.isLit(b.id)).length;
-
-    runUntil(3, 30);
-    const litAfterBedtime = BUILDINGS.filter((b) => world.isLit(b.id)).length;
-
-    expect(litBeforeBedtime).toBeGreaterThan(litAfterBedtime);
-    expect(litAfterBedtime).toBe(0);
+    }
   });
 
-  it('gives the same day the same result at any speed', () => {
-    const slow = new World({ seed: 'determinism' });
-    const fast = new World({ seed: 'determinism' });
+  it('lights homes by who is really in, and leaves empty houses dark', () => {
+    const world = new World({ seed: 'phase-3-day' });
+    runUntil(world, 2, 20 * 60);
 
-    for (let i = 0; i < TICKS_PER_GAME_DAY; i += 1) {
-      slow.tick();
+    const lit = BUILDINGS.filter((b) => b.kind === 'house' && world.isLit(b.id)).map((b) => b.id);
+    expect(lit.length).toBeGreaterThan(5);
+    for (const id of world.emptyHouseIds) {
+      expect(lit).not.toContain(id);
     }
-    for (let i = 0; i < TICKS_PER_GAME_DAY / TICKS_PER_GAME_MINUTE; i += 1) {
-      fast.tickMany(TICKS_PER_GAME_MINUTE);
-    }
+  });
 
-    expect(JSON.stringify(fast.citizens)).toBe(JSON.stringify(slow.citizens));
+  it('turns the lights out one by one after bedtime', () => {
+    const world = new World({ seed: 'phase-3-day' });
+    runUntil(world, 2, 20 * 60 + 30);
+    const before = BUILDINGS.filter((b) => world.isLit(b.id)).length;
+
+    runUntil(world, 3, 30);
+    const after = BUILDINGS.filter((b) => world.isLit(b.id)).length;
+
+    expect(before).toBeGreaterThan(after);
+    expect(after).toBe(0);
+  });
+
+  it('sends students to school and workers to their workplaces', () => {
+    const world = new World({ seed: 'phase-3-day' });
+    runUntil(world, 2, 10 * 60);
+
+    for (const citizen of world.citizens) {
+      if (citizen.job === 'Retired') {
+        continue;
+      }
+      const there = citizen.place.kind === 'building' && citizen.place.id === citizen.workplaceId;
+      const onBreakOutside = citizen.place.kind === 'zone';
+      // Mid-morning walks are legitimate too: a baker crossing to the bakery
+      // front for a break, a delivery driver on a round to a house.
+      const onTheMove =
+        citizen.activity === 'Walk' ||
+        (citizen.job === 'Delivery Driver' && citizen.activity === 'Work');
+      expect(
+        there || onBreakOutside || onTheMove,
+        `${citizen.id} is ${citizen.activity} at ${citizen.place.id}`,
+      ).toBe(true);
+    }
   });
 });

@@ -1,4 +1,6 @@
 export * from './CitizenSystem.js';
+export * from './EventLog.js';
+export * from './ScheduleSystem.js';
 export * from './constants.js';
 export * from './Rng.js';
 export * from './Navigation.js';

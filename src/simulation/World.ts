@@ -1,8 +1,9 @@
 import type { Citizen } from '../entities/Citizen.js';
-import { CAFE_CLOSES_AT, CAFE_ID, CAFE_OPENS_AT } from '../world/Town.js';
+import { isHomeAndAwake } from '../entities/Citizen.js';
+import { CAFE_CLOSES_AT, CAFE_ID, CAFE_OPENS_AT, HOUSES } from '../world/Town.js';
 
 import { CitizenSystem } from './CitizenSystem.js';
-import { HouseholdLights } from './HouseholdLights.js';
+import type { EventLog } from './EventLog.js';
 import { buildRoadGraph, NavGraph } from './Navigation.js';
 import { Rng } from './Rng.js';
 import { TimeSystem } from './TimeSystem.js';
@@ -20,6 +21,7 @@ const PUBLIC_OPENING_HOURS: Record<string, [number, number]> = {
   supermarket: [7 * 60, 21 * 60 + 30],
   bakery: [5 * 60 + 30, 18 * 60],
   office: [8 * 60, 19 * 60 + 30],
+  [CAFE_ID]: [CAFE_OPENS_AT, CAFE_CLOSES_AT],
 };
 
 /**
@@ -35,17 +37,16 @@ export class World {
   readonly time = new TimeSystem();
   readonly citizenSystem: CitizenSystem;
   readonly roads: NavGraph;
-  private readonly householdLights: HouseholdLights;
 
   constructor(options: WorldOptions = {}) {
     this.seed = options.seed ?? DEFAULT_SEED;
     this.rng = new Rng(this.seed);
     this.citizenSystem = new CitizenSystem(this.seed);
     this.roads = buildRoadGraph();
-    this.householdLights = new HouseholdLights(
-      this.seed,
-      this.citizenSystem.citizens.map((citizen) => citizen.homeId),
-    );
+  }
+
+  get citizens(): readonly Citizen[] {
+    return this.citizenSystem.citizens;
   }
 
   /** The pavement graph the citizens walk on. */
@@ -53,32 +54,32 @@ export class World {
     return this.citizenSystem.sidewalks;
   }
 
-  get citizens(): readonly Citizen[] {
-    return this.citizenSystem.citizens;
+  get log(): EventLog {
+    return this.citizenSystem.log;
   }
 
   /**
    * Whether the building's windows should be lit right now.
    *
-   * A house with a resident is lit when somebody is home and awake. A house
-   * without one falls back to the placeholder schedules in HouseholdLights
-   * until Phase 3 gives every house a family. Public buildings are lit while
-   * they are open, so the cafe is the last warm window in the street at night.
+   * A home is lit when somebody who lives there is in and awake. Public
+   * buildings are lit while they are open, so the cafe is the last warm
+   * window in the street at night. A house nobody lives in stays dark.
    */
   isLit(buildingId: string): boolean {
-    const minute = this.time.minuteOfDay;
+    const hours = PUBLIC_OPENING_HOURS[buildingId];
+    if (hours) {
+      const minute = this.time.minuteOfDay;
+      return minute >= hours[0] && minute < hours[1];
+    }
+    return this.citizens.some(
+      (citizen) => citizen.homeId === buildingId && isHomeAndAwake(citizen),
+    );
+  }
 
-    if (buildingId === CAFE_ID) {
-      return minute >= CAFE_OPENS_AT && minute < CAFE_CLOSES_AT;
-    }
-    if (this.householdLights.has(buildingId)) {
-      return this.householdLights.isLit(buildingId, minute);
-    }
-    if (PUBLIC_OPENING_HOURS[buildingId]) {
-      const [opens, closes] = PUBLIC_OPENING_HOURS[buildingId];
-      return minute >= opens && minute < closes;
-    }
-    return this.citizenSystem.isLit(buildingId);
+  /** Houses nobody lives in, which therefore never light up. */
+  get emptyHouseIds(): string[] {
+    const homes = new Set(this.citizens.map((citizen) => citizen.homeId));
+    return HOUSES.filter((house) => !homes.has(house.id)).map((house) => house.id);
   }
 
   /**
@@ -98,4 +99,42 @@ export class World {
       this.tick();
     }
   }
+
+  /**
+   * A hash of everything that can change: the clock, every citizen, the log.
+   * Two runs of the same seed must produce the same hash at the same tick,
+   * whatever speed they were played at (SPEC.md 3.2, 5.3).
+   */
+  stateHash(): string {
+    const snapshot = JSON.stringify({
+      tick: this.time.totalTicks,
+      citizens: this.citizens.map((citizen) => ({
+        ...citizen,
+        // Round so the hash is about state, not about the last bit of a float.
+        position: { x: round(citizen.position.x), z: round(citizen.position.z) },
+        heading: round(citizen.heading),
+        distanceWalked: round(citizen.distanceWalked),
+        socialNeed: round(citizen.socialNeed),
+        activityUntil: Number.isFinite(citizen.activityUntil)
+          ? round(citizen.activityUntil)
+          : 'open',
+        plan: citizen.plan.map((item) => ({
+          ...item,
+          at: round(item.at),
+          duration: round(item.duration),
+        })),
+      })),
+      log: this.log.entries,
+    });
+
+    let hash = 2166136261;
+    for (let i = 0; i < snapshot.length; i += 1) {
+      hash = Math.imul(hash ^ snapshot.charCodeAt(i), 16777619);
+    }
+    return (hash >>> 0).toString(16).padStart(8, '0');
+  }
+}
+
+function round(value: number): number {
+  return Math.round(value * 1e6) / 1e6;
 }

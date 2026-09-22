@@ -1,5 +1,33 @@
 # Changelog
 
+## Phase 3 — 40 citizens and the schedule system
+
+- `world/Population.ts`: forty fixed citizens in sixteen households, each with name, age,
+  gender, job, four personality traits, home, workplace, family links both ways and a few
+  friends (colleagues plus hand picked pairs). Jobs map to buildings per SPEC 2.4; doctors
+  practise from the office block.
+- `ScheduleSystem`: a written day per job, copied each morning with ±10 minutes of seeded
+  jitter and a few choices tilted by personality: lunch outside, the cafe after work, the
+  park for the retired. Leave times are worked out from the real route length. Delivery
+  drivers walk two rounds a day to houses until Phase 4 gives them a van.
+- `CitizenSystem`: appointments started when due, walking there on the pavement graph
+  first; an open-ended activity yields to the next appointment, a timed one is seen
+  through; a finished errand leads home; a social need that climbs while alone sends
+  people out to the cafe terrace on a whim. Everyone stands on their own spawn point in a
+  zone. All nine activities from SPEC 2.4; `Drive` is present but unused until Phase 4.
+- Windows are lit by who is really at home and awake. `HouseholdLights.ts` is gone. Seventeen
+  of the thirty houses have nobody living in them and stay dark.
+- `EventLog`: causes and milestones as full sentences, at most fifteen a day, with colour
+  lines (a walk to the park) giving way to milestones (running into a friend, arriving
+  late) and the last light going out always written.
+- `World.stateHash()` and `tests/determinism.test.ts`: the same seed at 1x and 100x gives the
+  same hash at 23:59 on day 2.
+- Citizens are drawn as instanced parts, one draw call per body part for the whole town, with
+  colour, height and hair length per instance; limbs swing with the stride and standing
+  people get small gestures by activity (talking, eating, working, a shopping bag).
+- Tests: the 30 day run checks nobody stands still in the open over 30 minutes, late arrivals
+  under 10%, every zone visited, somebody outside every daytime hour, and the diary shape.
+
 ## Phase 2.5 — Visual style pass and the bigger town
 
 - `DESIGN.md` adopted: cozy living miniature, not low-poly. SPEC 2.3, 2.9, 2.11 and 4.2

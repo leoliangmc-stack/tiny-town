@@ -346,12 +346,12 @@ export interface OutdoorZone {
 }
 
 export const OUTDOOR_ZONES: readonly OutdoorZone[] = [
-  zone('cafe-terrace', 'cafe', 'terrace', -7, 7, -11.5, -6.6, 5),
-  zone('school-playground', 'school', 'playground', -46, -26, -11.5, -6.6, 6),
-  zone('supermarket-forecourt', 'supermarket', 'forecourt', 26, 46, -11.5, -6.6, 5),
-  zone('bakery-front', 'bakery', 'terrace', -6, 6, 6.6, 11.5, 3),
-  zone('office-front', 'office', 'forecourt', 27, 45, 6.6, 11.5, 4),
-  zone('park-lawn', 'park', 'lawn', -47.5, -24.5, 7, 30, 8),
+  zone('cafe-terrace', 'cafe', 'terrace', -7, 7, -11.5, -6.6, 8),
+  zone('school-playground', 'school', 'playground', -46, -26, -11.5, -6.6, 12),
+  zone('supermarket-forecourt', 'supermarket', 'forecourt', 26, 46, -11.5, -6.6, 8),
+  zone('bakery-front', 'bakery', 'terrace', -6, 6, 6.6, 11.5, 5),
+  zone('office-front', 'office', 'forecourt', 27, 45, 6.6, 11.5, 8),
+  zone('park-lawn', 'park', 'lawn', -47.5, -24.5, 7, 30, 12),
 ];
 
 /** Builds a zone with its spawn points spread evenly across it. */
