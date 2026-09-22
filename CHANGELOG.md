@@ -2,6 +2,21 @@
 
 ## Phase 4.6 — Environment and sky
 
+Revised again for the camera (decision 28): the default view could not see the sky.
+
+- Default pitch lowered from 38° to 28° in landscape and from 50° to 38° in portrait, with
+  the aim point raised a little, so a band of sky sits at the top of the frame all day and
+  the whole town still fits. Below 28° the town flattened into a strip; this is the point
+  between seeing the sky and seeing the town.
+- After dark the default camera tilts down further, to 18° in landscape and 28° in
+  portrait, bringing the stars in over the lit town, and comes back up before dawn. The
+  move is driven by game time over about an hour, centred twenty minutes after sunset and
+  twenty before sunrise; at 20x it reads as one slow pan.
+- The free view wins: a drag, wheel or pinch that moves the camera ends the automatic
+  framing for good, and nothing pulls it back. A press that does not move it (a future
+  click on a citizen) leaves the framing in charge. Rotating the phone reframes as before.
+- The Milky Way is a step brighter and warmer; the windows still lead.
+
 Revised after the author saw the first night: the night sky is now a hero (decision 27).
 
 - The sky shader draws a Tekapo night. Three tiers of stars: a few dozen leading stars

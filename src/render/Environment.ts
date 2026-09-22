@@ -276,8 +276,8 @@ const SKY_FRAGMENT_SHADER = /* glsl */ `
         * (0.55 + 0.45 * fbm(vec2(along * 4.0, 3.0)));
       float glow = profile * pow(0.25 + 0.75 * structure, 2.2) * (0.5 + 0.8 * wisps) * (0.25 + 0.75 * coreness);
       glow *= 1.0 - 0.85 * lane;
-      vec3 milkyColor = mix(vec3(0.6, 0.7, 1.0), vec3(1.0, 0.88, 0.7), coreness * 0.85);
-      color += milkyColor * glow * 0.7 * starStrength * horizonFade;
+      vec3 milkyColor = mix(vec3(0.6, 0.7, 1.0), vec3(1.0, 0.86, 0.62), coreness * 0.9);
+      color += milkyColor * glow * 0.95 * starStrength * horizonFade;
 
       // Stars: the faint dust of the sky, denser inside the band; the
       // middling stars; and the leading few with a bloom and a spike.

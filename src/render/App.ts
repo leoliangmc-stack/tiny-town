@@ -20,6 +20,7 @@ import { townBounds } from '../world/Town.js';
 import { CitizenView } from './CitizenView.js';
 import { DebugView } from './DebugView.js';
 import { Environment } from './Environment.js';
+import { SUNRISE_MINUTE, SUNSET_MINUTE } from './palettes.js';
 import { Scenery } from './Scenery.js';
 import { TownView } from './TownView.js';
 import { VehicleView } from './VehicleView.js';
@@ -35,10 +36,11 @@ import { VehicleView } from './VehicleView.js';
  */
 const LANDSCAPE_VIEW = {
   yawDegrees: -25,
-  pitchDegrees: 38,
+  pitchDegrees: 28,
+  nightPitchDegrees: 18,
   fieldOfView: 42,
   margin: 0.95,
-  lift: 0.05,
+  lift: 0.09,
 };
 /**
  * Portrait takes a wider lens. A narrow screen would otherwise push the camera
@@ -46,13 +48,38 @@ const LANDSCAPE_VIEW = {
  */
 const PORTRAIT_VIEW = {
   yawDegrees: -100,
-  pitchDegrees: 50,
+  pitchDegrees: 38,
+  nightPitchDegrees: 28,
   fieldOfView: 60,
   margin: 0.88,
-  lift: 0,
+  lift: 0.12,
 };
 
 const CAMERA_TARGET = new Vector3(0, 2, 0);
+
+/**
+ * The night tilt (SPEC.md 2.9, decision 28): after dark the default camera
+ * comes down from the day pitch to the night pitch, bringing the stars in
+ * over the lit town, and goes back up at dawn. Each move takes about an hour
+ * of game time, centred a little after sunset and a little before sunrise, so
+ * the sky is dark by the time the camera arrives.
+ */
+const TILT_MINUTES = 60;
+const TILT_AFTER_SUNSET = 20;
+const TILT_BEFORE_SUNRISE = 20;
+
+/** How far into the night the camera is, 0 by day and 1 by night. */
+function nightAmount(minuteOfDay: number): number {
+  const ease = (t: number): number => t * t * (3 - 2 * t);
+  const clamp = (t: number): number => Math.min(1, Math.max(0, t));
+  const duskStart = SUNSET_MINUTE + TILT_AFTER_SUNSET - TILT_MINUTES / 2;
+  const dawnStart = SUNRISE_MINUTE - TILT_BEFORE_SUNRISE - TILT_MINUTES / 2;
+  const dusk = ease(clamp((minuteOfDay - duskStart) / TILT_MINUTES));
+  const dawn = ease(clamp((minuteOfDay - dawnStart) / TILT_MINUTES));
+  // Dusk carries the camera down; dawn brings it back. Between midnight and
+  // dawn only the dawn term moves; between dawn and dusk both are settled.
+  return minuteOfDay < SUNRISE_MINUTE + TILT_MINUTES ? 1 - dawn : dusk;
+}
 
 /** Tallest thing in the town, for the camera to frame over. */
 const TOWN_HEIGHT = 13;
@@ -99,6 +126,15 @@ export class App {
   private running = false;
   /** Speed to return to when the viewer unpauses. */
   private speedBeforePause: SpeedLevel = DEFAULT_SPEED;
+
+  /**
+   * Whether the camera still follows the default framing and its night tilt.
+   * The first drag, wheel or pinch hands the camera to the viewer for good
+   * (SPEC.md 2.9): the free view wins over any automatic move.
+   */
+  private autoFraming = true;
+  /** A pointer or wheel is held on the controls right now. */
+  private pointerDown = false;
 
   constructor(container: HTMLElement, world: World = new World()) {
     this.container = container;
@@ -155,6 +191,20 @@ export class App {
     // Keep the camera above the horizon so it never looks up from under the ground.
     controls.maxPolarAngle = Math.PI / 2 - 0.08;
     controls.touches = { ONE: TOUCH.ROTATE, TWO: TOUCH.DOLLY_PAN };
+    // A press alone (a future click on a citizen) does not take the camera;
+    // a press that moves it does. The automatic framing holds still while a
+    // pointer is down, so the only movement it can see is the viewer's.
+    controls.addEventListener('start', () => {
+      this.pointerDown = true;
+    });
+    controls.addEventListener('change', () => {
+      if (this.pointerDown) {
+        this.autoFraming = false;
+      }
+    });
+    controls.addEventListener('end', () => {
+      this.pointerDown = false;
+    });
     return controls;
   }
 
@@ -166,14 +216,29 @@ export class App {
    * until every corner of the town is inside the frustum.
    */
   private frameTown(): void {
+    this.autoFraming = true;
+    this.placeDefaultCamera();
+  }
+
+  /**
+   * Puts the camera on the default framing for this screen shape and this
+   * hour: the day pitch, the night pitch, or the slow move between them.
+   * Called every frame while the viewer has not taken the camera.
+   */
+  private placeDefaultCamera(): void {
     const portrait = this.aspectRatio() < 1;
     const view = portrait ? PORTRAIT_VIEW : LANDSCAPE_VIEW;
 
-    this.camera.fov = view.fieldOfView;
-    this.camera.updateProjectionMatrix();
+    if (this.camera.fov !== view.fieldOfView) {
+      this.camera.fov = view.fieldOfView;
+      this.camera.updateProjectionMatrix();
+    }
 
     const yaw = MathUtils.degToRad(view.yawDegrees);
-    const pitch = MathUtils.degToRad(view.pitchDegrees);
+    const night = nightAmount(this.world.time.minuteOfDay);
+    const pitch = MathUtils.degToRad(
+      view.pitchDegrees + (view.nightPitchDegrees - view.pitchDegrees) * night,
+    );
     const direction = new Vector3(
       Math.sin(yaw) * Math.cos(pitch),
       Math.sin(pitch),
@@ -298,6 +363,9 @@ export class App {
 
     this.debugView?.update(this.world);
 
+    if (this.autoFraming && !this.pointerDown) {
+      this.placeDefaultCamera();
+    }
     this.controls.update();
     this.renderer.render(this.scene, this.camera);
   };
