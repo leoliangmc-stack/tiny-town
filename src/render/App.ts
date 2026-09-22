@@ -33,10 +33,10 @@ import { TownView } from './TownView.js';
  */
 const LANDSCAPE_VIEW = {
   yawDegrees: -25,
-  pitchDegrees: 30,
+  pitchDegrees: 38,
   fieldOfView: 42,
-  margin: 0.97,
-  lift: 0.03,
+  margin: 0.95,
+  lift: 0.05,
 };
 /**
  * Portrait takes a wider lens. A narrow screen would otherwise push the camera
@@ -44,16 +44,16 @@ const LANDSCAPE_VIEW = {
  */
 const PORTRAIT_VIEW = {
   yawDegrees: -100,
-  pitchDegrees: 48,
+  pitchDegrees: 50,
   fieldOfView: 60,
-  margin: 0.78,
-  lift: 0.015,
+  margin: 0.88,
+  lift: 0,
 };
 
 const CAMERA_TARGET = new Vector3(0, 2, 0);
 
 /** Tallest thing in the town, for the camera to frame over. */
-const TOWN_HEIGHT = 12;
+const TOWN_HEIGHT = 13;
 
 /** `?debug` draws the navigation graphs and the routes over the town. */
 function debugRequested(): boolean {
@@ -107,7 +107,7 @@ export class App {
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = PCFSoftShadowMap;
     this.renderer.toneMapping = ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.15;
+    this.renderer.toneMappingExposure = 1.05;
     container.appendChild(this.renderer.domElement);
 
     this.camera = new PerspectiveCamera(42, this.aspectRatio(), 0.5, 900);
@@ -196,7 +196,10 @@ export class App {
     this.controls.update();
 
     // Keep the haze behind the town whatever distance the framing chose.
-    this.environment.setFogRange(distance * 0.95, distance + 240);
+    // The haze must start beyond the far side of the town, or the whole
+    // picture goes milky; the town sits between about 0.7 and 1.4 times the
+    // framing distance from the lens.
+    this.environment.setFogRange(distance * 1.35, distance * 1.35 + 360);
   }
 
   /**

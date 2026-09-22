@@ -90,7 +90,8 @@ describe('the layout', () => {
   it('has the buildings the spec asks for', () => {
     const kinds = BUILDINGS.map((building) => building.kind);
 
-    expect(kinds.filter((kind) => kind === 'house')).toHaveLength(20);
+    expect(kinds.filter((kind) => kind === 'house')).toHaveLength(30);
+    expect(kinds.filter((kind) => kind === 'apartment').length).toBeGreaterThanOrEqual(2);
     for (const kind of ['school', 'cafe', 'supermarket', 'bakery', 'office']) {
       expect(
         kinds.filter((candidate) => candidate === kind),
@@ -130,7 +131,9 @@ describe('the layout', () => {
   });
 
   it('gives every public building an outdoor zone with spawn points', () => {
-    const publicBuildings = BUILDINGS.filter((building) => building.kind !== 'house');
+    const publicBuildings = BUILDINGS.filter(
+      (building) => building.kind !== 'house' && building.kind !== 'apartment',
+    );
 
     for (const building of publicBuildings) {
       const zone = OUTDOOR_ZONES.find((candidate) => candidate.buildingId === building.id);
@@ -164,7 +167,28 @@ describe('the layout', () => {
     const width = bounds.maxX - bounds.minX;
     const depth = bounds.maxZ - bounds.minZ;
 
-    expect(width).toBeGreaterThan(140);
+    expect(width).toBeGreaterThan(170);
     expect(depth).toBeGreaterThan(100);
+  });
+
+  it('gives every house its own look', () => {
+    const houses = BUILDINGS.filter((building) => building.kind === 'house');
+    const looks = new Set(
+      houses.map((house) => {
+        const style = house.style;
+        expect(style, `${house.id} has no style`).toBeDefined();
+        return [
+          style?.roofKind,
+          style?.roofColor,
+          style?.wallColor,
+          style?.porch,
+          style?.balcony,
+          style?.fence,
+          style?.prop,
+        ].join('|');
+      }),
+    );
+
+    expect(looks.size).toBe(houses.length);
   });
 });

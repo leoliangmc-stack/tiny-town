@@ -1,6 +1,30 @@
 import type { Point } from './geometry.js';
 
-export type BuildingKind = 'house' | 'cafe' | 'school' | 'supermarket' | 'bakery' | 'office';
+export type BuildingKind =
+  'house' | 'apartment' | 'cafe' | 'school' | 'supermarket' | 'bakery' | 'office';
+
+export type RoofKind = 'gable' | 'hip' | 'flat';
+
+/** What a house's front yard holds, so each home shows a sign of life (DESIGN.md §4). */
+export type YardProp = 'mailbox' | 'bicycle' | 'bin' | 'flower-pots' | 'none';
+
+/**
+ * How one house looks. Every house gets its own combination so no two homes
+ * read the same (SPEC.md 2.3). The values are chosen in world/Town.ts from the
+ * house number, so they never change between runs.
+ */
+export interface HouseStyle {
+  roofKind: RoofKind;
+  roofColor: number;
+  wallColor: number;
+  trimColor: number;
+  porch: boolean;
+  balcony: boolean;
+  fence: boolean;
+  /** A strip of flowers along the front of the house. */
+  flowerBed: boolean;
+  prop: YardProp;
+}
 
 /**
  * One building in the fixed town layout.
@@ -24,6 +48,8 @@ export interface Building {
   rotationY: number;
   /** Number of window rows on the facades. */
   floors: number;
+  /** Only houses carry a style; public buildings have their own fixed look. */
+  style?: HouseStyle;
 }
 
 /** Unit vector the front of the building faces. */

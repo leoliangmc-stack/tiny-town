@@ -1,15 +1,16 @@
-import type { Building } from '../entities/Building.js';
+import type { Building, HouseStyle, RoofKind, YardProp } from '../entities/Building.js';
 import { footprintBounds } from '../entities/Building.js';
 import type { Point } from '../entities/geometry.js';
 
 /**
- * The fixed town layout, as plain data (SPEC.md 2.3).
+ * The fixed town layout, as plain data (SPEC.md 2.3, DESIGN.md).
  *
- * The town is a high street running east to west with two residential lanes
- * either side of it, tied together by four cross streets. Everything public
- * fronts the high street, so the middle of the town reads as a centre: school
- * and park at the west end, cafe and bakery facing each other in the middle,
- * supermarket and office at the east end.
+ * A high street runs east to west with a residential lane either side of it,
+ * tied together by six cross streets into a closed grid of ten blocks.
+ * Everything public fronts the high street, so the middle reads as a centre:
+ * school and park at the west end, cafe and bakery facing each other in the
+ * middle, supermarket, car park and office at the east end. Houses sit two to
+ * a block face along the lanes, with small apartment blocks on three corners.
  *
  * Nothing in this file may import Three.js: the renderer reads this data, not
  * the other way around.
@@ -27,7 +28,7 @@ export const SIDEWALK_OFFSET = ROAD_WIDTH / 2 + SIDEWALK_WIDTH / 2;
 export const SIDEWALK_EDGE = ROAD_WIDTH / 2 + SIDEWALK_WIDTH;
 
 /** The ground runs well past the town and fades into the fog at its edge. */
-export const GROUND_SIZE = 700;
+export const GROUND_SIZE = 800;
 
 /**
  * A street, always axis aligned.
@@ -46,14 +47,21 @@ export interface Street {
   to: number;
 }
 
+/** Where the lanes sit either side of the high street. */
+const LANE_Z = 40;
+/** Where the cross streets sit. The outer pair closes the grid. */
+const CROSS_X = [-86, -54, -18, 18, 54, 86] as const;
+
 export const STREETS: readonly Street[] = [
-  { id: 'high-street', axis: 'x', at: 0, from: -78, to: 78 },
-  { id: 'north-lane', axis: 'x', at: -40, from: -74, to: 74 },
-  { id: 'south-lane', axis: 'x', at: 40, from: -74, to: 74 },
-  { id: 'west-cross', axis: 'z', at: -54, from: -40, to: 40 },
-  { id: 'mill-cross', axis: 'z', at: -18, from: -40, to: 40 },
-  { id: 'market-cross', axis: 'z', at: 18, from: -40, to: 40 },
-  { id: 'east-cross', axis: 'z', at: 54, from: -40, to: 40 },
+  { id: 'high-street', axis: 'x', at: 0, from: -86, to: 86 },
+  { id: 'north-lane', axis: 'x', at: -LANE_Z, from: -86, to: 86 },
+  { id: 'south-lane', axis: 'x', at: LANE_Z, from: -86, to: 86 },
+  { id: 'far-west-cross', axis: 'z', at: CROSS_X[0], from: -LANE_Z, to: LANE_Z },
+  { id: 'west-cross', axis: 'z', at: CROSS_X[1], from: -LANE_Z, to: LANE_Z },
+  { id: 'mill-cross', axis: 'z', at: CROSS_X[2], from: -LANE_Z, to: LANE_Z },
+  { id: 'market-cross', axis: 'z', at: CROSS_X[3], from: -LANE_Z, to: LANE_Z },
+  { id: 'east-cross', axis: 'z', at: CROSS_X[4], from: -LANE_Z, to: LANE_Z },
+  { id: 'far-east-cross', axis: 'z', at: CROSS_X[5], from: -LANE_Z, to: LANE_Z },
 ];
 
 export const CAFE_ID = 'cafe';
@@ -63,11 +71,83 @@ export const CAFE_OPENS_AT = 6 * 60;
 export const CAFE_CLOSES_AT = 23 * 60 + 30;
 
 /**
+ * The rows the houses stand in, as the z of a house centre and the way it
+ * faces. Each lane has a row on either side of it.
+ */
+const ROW_NORTH_OUTER = { z: -52, rotationY: 0 };
+const ROW_NORTH_INNER = { z: -28, rotationY: Math.PI };
+const ROW_SOUTH_INNER = { z: 28, rotationY: 0 };
+const ROW_SOUTH_OUTER = { z: 52, rotationY: Math.PI };
+
+/** House centres along a row: two per block, either side of the block centre. */
+const HOUSE_X = {
+  farWest: [-74.6, -65.2],
+  west: [-41.5, -30.5],
+  middle: [-5.5, 5.5],
+  east: [30.5, 41.5],
+  farEast: [65.2, 74.6],
+} as const;
+
+/** The end blocks are a little tighter, so the houses in them are a little slimmer. */
+function isEndBlock(x: number): boolean {
+  return Math.abs(x) > 60;
+}
+
+const HOUSE_NAMES = [
+  'Maple',
+  'Alder',
+  'Rowan',
+  'Hazel',
+  'Elder',
+  'Juniper',
+  'Holly',
+  'Bramble',
+  'Clover',
+  'Fern',
+  'Larch',
+  'Poplar',
+  'Cedar',
+  'Sorrel',
+  'Birch',
+  'Linden',
+  'Aspen',
+  'Willow',
+  'Ash',
+  'Beech',
+  'Chestnut',
+  'Hawthorn',
+  'Ivy',
+  'Laurel',
+  'Myrtle',
+  'Olive',
+  'Pine',
+  'Quince',
+  'Sycamore',
+  'Yew',
+];
+
+/** A row of houses, numbered on from `firstNumber`. */
+function row(
+  firstNumber: number,
+  placement: { z: number; rotationY: number },
+  xs: readonly number[],
+): Building[] {
+  return xs.map((x, index) => house(firstNumber + index, x, placement.z, placement.rotationY));
+}
+
+/**
+ * Wall and roof colours, all warm and low in saturation (DESIGN.md §10).
+ * Houses draw from these by number, so the mix down a street is fixed.
+ */
+const WALL_COLORS = [0xf1ebdf, 0xeadfc6, 0xd8d5cf, 0xc5d3dc, 0xcfd8c2, 0xb9a58c, 0xecd9c4];
+const ROOF_COLORS = [0xb8695a, 0x5f5e5c, 0x6e7f8c, 0x8a6a52, 0x7f9478, 0xa65f4f];
+const YARD_PROPS: readonly YardProp[] = ['mailbox', 'flower-pots', 'bicycle', 'bin', 'mailbox'];
+
+/**
  * Every building in the town.
  *
  * The public buildings sit on the high street with room in front of them for
- * an outdoor zone. The houses sit in rows along the lanes and the high street,
- * two to a block face.
+ * an outdoor zone. The houses are listed row by row, west to east.
  */
 export const BUILDINGS: readonly Building[] = [
   // --- The high street, north side, west to east ---
@@ -134,55 +214,105 @@ export const BUILDINGS: readonly Building[] = [
     floors: 3,
   },
 
-  // --- Houses: north of the north lane, facing the lane ---
-  house('house-01', 'Maple House', -41, -52, 0),
-  house('house-02', 'Alder House', -30, -52, 0),
-  house('house-03', 'Rowan House', -6, -52, 0),
-  house('house-04', 'Hazel House', 6, -52, 0),
-  house('house-05', 'Elder House', 30, -52, 0),
-  house('house-06', 'Juniper House', 41, -52, 0),
+  // --- Apartment blocks on three corners of the town ---
+  apartment('apartment-01', 'Elm Court', 70, ROW_NORTH_OUTER.z, ROW_NORTH_OUTER.rotationY),
+  apartment('apartment-02', 'Orchard Court', -70, ROW_SOUTH_OUTER.z, ROW_SOUTH_OUTER.rotationY),
+  apartment('apartment-03', 'Station Court', 70, 14, Math.PI),
 
-  // --- Houses: south of the north lane, backing onto the high street ---
-  house('house-07', 'Holly House', -41, -28, Math.PI),
-  house('house-08', 'Bramble House', -6, -28, Math.PI),
-  house('house-09', 'Clover House', 6, -28, Math.PI),
-  house('house-10', 'Fern House', 41, -28, Math.PI),
-
-  // --- Houses: north of the south lane ---
-  house('house-11', 'Larch House', -6, 28, 0),
-  house('house-12', 'Poplar House', 6, 28, 0),
-  house('house-13', 'Cedar House', 30, 28, 0),
-  house('house-14', 'Sorrel House', 41, 28, 0),
-
-  // --- Houses: south of the south lane, facing the lane ---
-  house('house-15', 'Birch House', -41, 52, Math.PI),
-  house('house-16', 'Linden House', -30, 52, Math.PI),
-  house('house-17', 'Aspen House', -6, 52, Math.PI),
-  house('house-18', 'Willow House', 6, 52, Math.PI),
-  house('house-19', 'Ash House', 30, 52, Math.PI),
-  house('house-20', 'Beech House', 41, 52, Math.PI),
+  // --- Houses north of the north lane, facing the lane ---
+  ...row(1, ROW_NORTH_OUTER, [
+    ...HOUSE_X.farWest,
+    ...HOUSE_X.west,
+    ...HOUSE_X.middle,
+    ...HOUSE_X.east,
+  ]),
+  // --- Houses south of the north lane, backing onto the high street ---
+  ...row(9, ROW_NORTH_INNER, [
+    ...HOUSE_X.farWest,
+    HOUSE_X.west[0],
+    ...HOUSE_X.middle,
+    HOUSE_X.east[1],
+    HOUSE_X.farEast[1],
+  ]),
+  // --- Houses north of the south lane (the park takes the west block) ---
+  ...row(16, ROW_SOUTH_INNER, [
+    ...HOUSE_X.farWest,
+    ...HOUSE_X.middle,
+    ...HOUSE_X.east,
+    HOUSE_X.farEast[1],
+  ]),
+  // --- Houses south of the south lane, facing the lane ---
+  ...row(23, ROW_SOUTH_OUTER, [
+    ...HOUSE_X.west,
+    ...HOUSE_X.middle,
+    ...HOUSE_X.east,
+    ...HOUSE_X.farEast,
+  ]),
 ];
 
 /**
- * A house. They vary a little in size so a row never looks stamped out, but
- * the variation is deterministic: it comes from the house number.
+ * How house number `n` looks. Every rule here is a simple function of the
+ * number, so a house is the same every time and no two are alike.
  */
-function house(id: string, name: string, x: number, z: number, rotationY: number): Building {
-  const number = Number(id.slice(-2));
-  const wobble = (offset: number, amount: number): number =>
-    ((number * 37 + offset) % 7) * (amount / 7);
+function houseStyle(n: number): HouseStyle {
+  let roofKind: RoofKind = 'gable';
+  if (n % 5 === 0) {
+    roofKind = 'flat';
+  } else if (n % 3 === 0) {
+    roofKind = 'hip';
+  }
 
   return {
-    id,
+    roofKind,
+    roofColor: ROOF_COLORS[(n * 7) % ROOF_COLORS.length],
+    wallColor: WALL_COLORS[(n * 3) % WALL_COLORS.length],
+    trimColor: n % 2 === 0 ? 0xf5f0e6 : 0x6b5a48,
+    porch: roofKind === 'gable' && n % 2 === 1,
+    balcony: roofKind === 'hip' || (roofKind === 'flat' && n % 2 === 0),
+    fence: n % 4 === 1 || n % 4 === 2,
+    flowerBed: n % 3 !== 0,
+    prop: YARD_PROPS[n % YARD_PROPS.length],
+  };
+}
+
+/**
+ * A house. Size varies a little by number so a row never looks stamped out;
+ * the look comes from houseStyle.
+ */
+function house(number: number, x: number, z: number, rotationY: number): Building {
+  const wobble = (offset: number, amount: number): number =>
+    ((number * 37 + offset) % 7) * (amount / 7);
+  const style = houseStyle(number);
+  const modern = style.roofKind === 'flat';
+
+  return {
+    id: `house-${String(number).padStart(2, '0')}`,
     kind: 'house',
-    name,
+    name: `${HOUSE_NAMES[(number - 1) % HOUSE_NAMES.length]} House`,
     position: { x, z },
-    width: 8.5 + wobble(0, 1.6),
-    depth: 7 + wobble(3, 1.2),
-    wallHeight: 5 + wobble(5, 1.4),
-    roofHeight: 2.6 + wobble(1, 1.2),
+    width: isEndBlock(x) ? 8.2 + wobble(0, 0.6) : 8.4 + wobble(0, 1.2),
+    depth: 6.8 + wobble(3, 1.2),
+    wallHeight: (modern ? 5.6 : 4.9) + wobble(5, 1.2),
+    roofHeight: modern ? 0.5 : 2.4 + wobble(1, 1.2),
     rotationY,
     floors: 2,
+    style,
+  };
+}
+
+/** A small three storey apartment block. */
+function apartment(id: string, name: string, x: number, z: number, rotationY: number): Building {
+  return {
+    id,
+    kind: 'apartment',
+    name,
+    position: { x, z },
+    width: 14,
+    depth: 9.5,
+    wallHeight: 9.6,
+    roofHeight: 0.7,
+    rotationY,
+    floors: 3,
   };
 }
 
@@ -241,10 +371,10 @@ function zone(
 
   for (let index = 0; index < spawnCount; index += 1) {
     const column = index % columns;
-    const row = Math.floor(index / columns);
+    const rowIndex = Math.floor(index / columns);
     spawnPoints.push({
       x: minX + ((column + 0.5) / columns) * (maxX - minX),
-      z: minZ + ((row + 0.5) / rows) * (maxZ - minZ),
+      z: minZ + ((rowIndex + 0.5) / rows) * (maxZ - minZ),
     });
   }
 
@@ -265,17 +395,17 @@ export const PARK = getZone('park-lawn');
 /** The car park at the east end, off the east cross street. */
 export const PARKING_LOT = {
   id: 'parking-lot',
-  minX: 60,
-  maxX: 74,
-  minZ: -26,
+  minX: 58,
+  maxX: 76,
+  minZ: -22,
   maxZ: -8,
-  /** Where cars stand. Phase 4 drives them here. */
+  /** Where cars stand, in two rows. Phase 4 drives them here. */
   spaces: Array.from({ length: 8 }, (_, index) => ({
-    x: index < 4 ? 64 : 70,
-    z: -23 + (index % 4) * 4.6,
+    x: 61 + (index % 4) * 4.5,
+    z: index < 4 ? -18.5 : -11.5,
   })),
   /** Where the lot meets the road network. */
-  entrance: { x: 60, z: -14 },
+  entrance: { x: 58, z: -15 },
 } as const;
 
 export interface Tree {
@@ -285,51 +415,44 @@ export interface Tree {
 }
 
 /**
- * Trees. The park is planted densely, the streets get a row of them, and the
- * gaps between houses get one or two so no block face is bare.
+ * Trees. The park is planted densely, the high street gets a row of them,
+ * every empty house slot gets one, and the corners of the town get a few so
+ * the grid does not end in bare grass.
  */
 export const TREES: readonly Tree[] = [
   ...parkTrees(),
   ...streetTrees(),
+  ...emptySlotTrees(),
   // Around the school playground.
-  { position: { x: -49, z: -9 }, shape: 'round', height: 7.5 },
-  { position: { x: -23, z: -9 }, shape: 'round', height: 7 },
-  { position: { x: -49, z: -21 }, shape: 'pine', height: 9 },
-  { position: { x: -23, z: -22 }, shape: 'pine', height: 8.5 },
-  // Gaps in the house rows.
-  { position: { x: -35.5, z: -28 }, shape: 'round', height: 6.5 },
-  { position: { x: -24, z: -30 }, shape: 'pine', height: 8 },
-  { position: { x: 0, z: -30 }, shape: 'round', height: 6 },
-  { position: { x: 24, z: -30 }, shape: 'round', height: 6.8 },
-  { position: { x: 35.5, z: -28 }, shape: 'pine', height: 8.5 },
-  { position: { x: 0, z: -46 }, shape: 'round', height: 6.4 },
-  { position: { x: -35.5, z: -46 }, shape: 'pine', height: 8 },
-  { position: { x: 35.5, z: -46 }, shape: 'round', height: 7 },
-  { position: { x: -24, z: -48 }, shape: 'round', height: 6.2 },
-  { position: { x: 24, z: -48 }, shape: 'pine', height: 7.8 },
-  { position: { x: 0, z: 30 }, shape: 'round', height: 6.6 },
-  { position: { x: 24, z: 30 }, shape: 'pine', height: 8.2 },
-  { position: { x: 35.5, z: 30 }, shape: 'round', height: 6.4 },
-  { position: { x: -35.5, z: 48 }, shape: 'round', height: 7 },
-  { position: { x: -24, z: 50 }, shape: 'pine', height: 8.4 },
-  { position: { x: 0, z: 48 }, shape: 'round', height: 6.2 },
-  { position: { x: 24, z: 50 }, shape: 'round', height: 7.2 },
-  { position: { x: 35.5, z: 48 }, shape: 'pine', height: 8 },
-  // The eastern end, around the car park.
-  { position: { x: 66, z: -4 }, shape: 'round', height: 7 },
-  { position: { x: 76, z: -20 }, shape: 'pine', height: 9 },
-  { position: { x: 66, z: 12 }, shape: 'round', height: 7.4 },
-  { position: { x: 68, z: 34 }, shape: 'pine', height: 8.6 },
-  // The western end.
-  { position: { x: -66, z: -12 }, shape: 'pine', height: 9.5 },
-  { position: { x: -68, z: 10 }, shape: 'round', height: 7.6 },
-  { position: { x: -64, z: 30 }, shape: 'round', height: 7 },
-  { position: { x: -66, z: -32 }, shape: 'round', height: 6.8 },
+  { position: { x: -49, z: -9 }, shape: 'round', height: 8 },
+  { position: { x: -23, z: -9 }, shape: 'round', height: 7.5 },
+  { position: { x: -49.5, z: -21 }, shape: 'pine', height: 9.5 },
+  { position: { x: -23, z: -22 }, shape: 'pine', height: 9 },
+  // The green at the west end of the high street.
+  { position: { x: -66, z: -14 }, shape: 'round', height: 8.5 },
+  { position: { x: -74, z: -11 }, shape: 'pine', height: 10 },
+  { position: { x: -70, z: 13 }, shape: 'round', height: 8.5 },
+  { position: { x: -78, z: 16 }, shape: 'round', height: 7.5 },
+  { position: { x: -62, z: 16 }, shape: 'pine', height: 9.5 },
+  // Beside the car park and the eastern apartments.
+  { position: { x: 79, z: -13 }, shape: 'round', height: 7.5 },
+  { position: { x: 60, z: 14 }, shape: 'round', height: 7 },
+  { position: { x: 80, z: 12 }, shape: 'pine', height: 9 },
+  { position: { x: 60, z: -50 }, shape: 'pine', height: 9.5 },
+  { position: { x: 80, z: -48 }, shape: 'round', height: 8 },
+  { position: { x: -80, z: 48 }, shape: 'round', height: 8 },
+  { position: { x: -60, z: 50 }, shape: 'pine', height: 9.5 },
+  // The corners of the town.
+  { position: { x: -92, z: -50 }, shape: 'pine', height: 10 },
+  { position: { x: -92, z: 52 }, shape: 'round', height: 8 },
+  { position: { x: 92, z: -50 }, shape: 'round', height: 8.5 },
+  { position: { x: 92, z: 52 }, shape: 'pine', height: 10 },
+  { position: { x: -92, z: 0 }, shape: 'round', height: 7.5 },
+  { position: { x: 92, z: 2 }, shape: 'round', height: 7.5 },
 ];
 
-/** A loose grid of trees inside the park, skipping the middle for the lawn. */
+/** A loose ring of trees inside the park, leaving the middle for the lawn. */
 function parkTrees(): Tree[] {
-  const trees: Tree[] = [];
   const positions: Array<[number, number, 'round' | 'pine']> = [
     [-45, 10, 'round'],
     [-38, 9, 'pine'],
@@ -339,29 +462,91 @@ function parkTrees(): Tree[] {
     [-45, 27, 'round'],
     [-37, 28, 'pine'],
     [-28, 26, 'round'],
-    [-33, 19, 'round'],
+    [-33, 20, 'round'],
   ];
-  for (const [x, z, shape] of positions) {
-    trees.push({
-      position: { x, z },
-      shape,
-      height: shape === 'pine' ? 9.5 : 7.8,
-    });
-  }
-  return trees;
+  return positions.map(([x, z, shape]) => ({
+    position: { x, z },
+    shape,
+    height: shape === 'pine' ? 10 : 8.5,
+  }));
 }
 
-/** A line of trees down the middle stretch of the high street verges. */
+/** A line of trees down the high street verges, clear of the outdoor zones. */
 function streetTrees(): Tree[] {
   const trees: Tree[] = [];
-  for (const x of [-48, -24, 24, 48]) {
-    trees.push({ position: { x, z: -8.5 }, shape: 'round', height: 6.5 });
-    trees.push({ position: { x, z: 8.5 }, shape: 'round', height: 6.5 });
+  for (const x of [-74, -60, -48, -24, 24, 48, 60, 74]) {
+    trees.push({ position: { x, z: -8.5 }, shape: 'round', height: 7 });
+    trees.push({ position: { x, z: 8.5 }, shape: 'round', height: 7 });
   }
   return trees;
 }
 
-export const STREET_LAMP_HEIGHT = 5.4;
+/** A tree in every house slot that has no house, so no block face is bare. */
+function emptySlotTrees(): Tree[] {
+  const trees: Tree[] = [];
+  const slots = Object.values(HOUSE_X).flat();
+  const rows = [ROW_NORTH_OUTER, ROW_NORTH_INNER, ROW_SOUTH_INNER, ROW_SOUTH_OUTER];
+
+  rows.forEach((placement, rowIndex) => {
+    for (const x of slots) {
+      const taken = BUILDINGS.some(
+        (building) =>
+          Math.abs(building.position.x - x) < 8 && Math.abs(building.position.z - placement.z) < 4,
+      );
+      const inPark = placement === ROW_SOUTH_INNER && x >= PARK.minX - 4 && x <= PARK.maxX + 4;
+      if (taken || inPark) {
+        continue;
+      }
+      trees.push({
+        position: { x, z: placement.z + (rowIndex % 2 === 0 ? 1 : -1) },
+        shape: (x + rowIndex) % 2 === 0 ? 'round' : 'pine',
+        height: 7.5 + ((Math.abs(x) + rowIndex) % 3),
+      });
+    }
+  });
+
+  return trees;
+}
+
+/** A low hedge or shrub, a soft blob on the ground. */
+export interface Shrub {
+  position: Point;
+  radius: number;
+}
+
+/** Shrubs along the high street verges and at the ends of the park path. */
+export const SHRUBS: readonly Shrub[] = [
+  ...[-68, -54, -30, -18, 18, 30, 54, 68].flatMap((x) => [
+    { position: { x, z: -7.5 }, radius: 1.1 },
+    { position: { x, z: 7.5 }, radius: 1.1 },
+  ]),
+  { position: { x: -47, z: 18.5 }, radius: 1.4 },
+  { position: { x: -25, z: 18.5 }, radius: 1.4 },
+  { position: { x: 57, z: -10 }, radius: 1.2 },
+  { position: { x: 77, z: -10 }, radius: 1.2 },
+];
+
+/** A bed of flowers: a low patch of colour. */
+export interface FlowerBed {
+  minX: number;
+  maxX: number;
+  minZ: number;
+  maxZ: number;
+}
+
+export const FLOWER_BEDS: readonly FlowerBed[] = [
+  // Either side of the cafe terrace and the bakery front.
+  { minX: -13, maxX: -8.5, minZ: -11, maxZ: -7.5 },
+  { minX: 8.5, maxX: 13, minZ: -11, maxZ: -7.5 },
+  { minX: -12, maxX: -7.5, minZ: 7.5, maxZ: 11 },
+  { minX: 7.5, maxX: 12, minZ: 7.5, maxZ: 11 },
+  // In the park, beside the path.
+  { minX: -44, maxX: -28, minZ: 21.5, maxZ: 23 },
+  // The green at the west end.
+  { minX: -76, maxX: -64, minZ: -9.5, maxZ: -7.5 },
+];
+
+export const STREET_LAMP_HEIGHT = 5.2;
 
 /** Street lamps, spaced along the pavement of every street. */
 export function streetLampPositions(spacing = 26): Point[] {
@@ -400,12 +585,12 @@ export const STREET_SIGNS: readonly StreetSign[] = [
     label: 'High St',
   },
   {
-    position: { x: -54 + SIDEWALK_OFFSET, z: -40 - SIDEWALK_OFFSET },
+    position: { x: -54 + SIDEWALK_OFFSET, z: -LANE_Z - SIDEWALK_OFFSET },
     rotationY: 0,
     label: 'North Ln',
   },
   {
-    position: { x: 54 - SIDEWALK_OFFSET, z: 40 + SIDEWALK_OFFSET },
+    position: { x: 54 - SIDEWALK_OFFSET, z: LANE_Z + SIDEWALK_OFFSET },
     rotationY: Math.PI,
     label: 'South Ln',
   },

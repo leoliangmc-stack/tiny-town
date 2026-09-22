@@ -1,5 +1,28 @@
 # Changelog
 
+## Phase 2.5 — Visual style pass and the bigger town
+
+- `DESIGN.md` adopted: cozy living miniature, not low-poly. SPEC 2.3, 2.9, 2.11 and 4.2
+  amended first (decisions 21–24), then the code.
+- The town grows to 30 houses plus three small apartment blocks on a closed grid of six
+  cross streets: about 184 by 114 metres, with the end blocks filled rather than the same
+  buildings spread thinner.
+- Every house is its own home: gable, hip or flat roof; roof and wall colours from a warm
+  low-saturation palette; porch, balcony, fence and flower bed by house number; one sign
+  of life per yard (mailbox, bicycle, bin or flower pots). `tests/navigation.test.ts`
+  checks no two houses share a look.
+- Buildings are rounded boxes with window frames and matte materials. Pavements are raised
+  kerbs, junctions carry zebra crossings, the car park has painted bays, the park has a
+  path and benches, the cafe terrace has tables and stools, the schoolyard a climbing
+  frame. Shrubs and flower beds along the high street.
+- Trees are rounder and a little oversized; smooth shading throughout.
+- Light: shadows softened (wider filter, capped strength, stronger fill), palettes moved to
+  the DESIGN.md colours, the sun arc lengthened to cover the bigger map.
+- Camera: about 38° in landscape and 50° in portrait (SPEC 2.9), framed from the real
+  layout bounds with the haze starting beyond the far side of the town.
+- Citizens are miniature people built from parts — head, hair cap, torso, arms, legs —
+  with a procedural walk that swings the legs and arms. Idle gestures wait for Phase 3.
+
 ## Phase 2 — Full map and navigation graph
 
 - The whole town, as data in `world/Town.ts`: a high street with two residential lanes

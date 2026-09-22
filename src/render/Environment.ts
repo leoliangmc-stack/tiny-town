@@ -32,10 +32,16 @@ const NOON_AZIMUTH = (135 * Math.PI) / 180;
 /** The sun never drops below this, so night keeps a low raking moonlight. */
 const MIN_SUN_ELEVATION = (4 * Math.PI) / 180;
 
-const SUN_DISTANCE = 120;
+const SUN_DISTANCE = 220;
 
 /** Shadows fade in over this much elevation above the night time minimum. */
 const SHADOW_FADE_ELEVATION = (5 * Math.PI) / 180;
+
+/**
+ * How dark a shadow gets at most. Well under one: the town is a soft miniature
+ * under diffuse light, not a sundial (DESIGN.md §11).
+ */
+const SHADOW_STRENGTH = 0.7;
 
 const SKY_VERTEX_SHADER = /* glsl */ `
   varying vec3 vWorldPosition;
@@ -123,14 +129,16 @@ export class Environment {
     this.sun = new DirectionalLight(0xfff8e6, 2);
     this.sun.castShadow = true;
     this.sun.shadow.mapSize.set(2048, 2048);
-    this.sun.shadow.camera.near = 40;
-    this.sun.shadow.camera.far = 260;
-    this.sun.shadow.camera.left = -55;
-    this.sun.shadow.camera.right = 55;
-    this.sun.shadow.camera.top = 55;
-    this.sun.shadow.camera.bottom = -55;
+    this.sun.shadow.camera.near = 60;
+    this.sun.shadow.camera.far = 420;
+    this.sun.shadow.camera.left = -110;
+    this.sun.shadow.camera.right = 110;
+    this.sun.shadow.camera.top = 110;
+    this.sun.shadow.camera.bottom = -110;
     this.sun.shadow.bias = -0.0009;
-    this.sun.shadow.normalBias = 0.05;
+    this.sun.shadow.normalBias = 0.06;
+    // A wide filter kernel blurs the shadow edge into something soft.
+    this.sun.shadow.radius = 6;
     // The shadow camera keeps its default 10x10 frustum until this is called,
     // which leaves everything but the middle of the town without a shadow.
     this.sun.shadow.camera.updateProjectionMatrix();
@@ -173,9 +181,9 @@ export class Environment {
 
     // A sun on the horizon throws shadows the length of the map, which reads as
     // scratches across the grass rather than as light. Fade them out instead.
-    this.sun.shadow.intensity = smoothStep(
-      Math.min(1, Math.max(0, (elevation - MIN_SUN_ELEVATION) / SHADOW_FADE_ELEVATION)),
-    );
+    this.sun.shadow.intensity =
+      SHADOW_STRENGTH *
+      smoothStep(Math.min(1, Math.max(0, (elevation - MIN_SUN_ELEVATION) / SHADOW_FADE_ELEVATION)));
     this.sun.position.set(
       Math.cos(azimuth) * Math.cos(elevation) * SUN_DISTANCE,
       Math.sin(elevation) * SUN_DISTANCE,
