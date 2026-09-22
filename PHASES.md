@@ -50,7 +50,7 @@ Companion to `SPEC.md` (the single source of truth for requirements) and `DESIGN
 - Speed control exposed via a temporary keyboard shortcut (1/2/3/4 keys) and pause on space.
 - Default start Day 1, 05:30, default speed 5×.
 
-**Out of scope.** Real navigation, 40 citizens, cars, weather, UI panels.
+**Out of scope.** Real navigation, the full population, cars, weather, UI panels.
 
 **Acceptance.**
 
@@ -102,13 +102,13 @@ Companion to `SPEC.md` (the single source of truth for requirements) and `DESIGN
 - Dawn, day, dusk and night screenshots on desktop and portrait judged by the author against `DESIGN.md`.
 - No drop below the Phase 2 frame rate on desktop.
 
-## Phase 3 — 40 citizens and the schedule system
+## Phase 3 — 60 citizens and the schedule system
 
 **Goal.** A fixed population living autonomous, slightly desynchronised days, driven by a rule-based state machine.
 
 **Scope.**
 
-- `world/Population.ts`: 40 fixed citizens with name, age, gender, personality (social, energy, outdoorPreference, workPreference: 0–100), home, workplace, family links (spouse, parents, children, siblings), friends. Families share a house.
+- `world/Population.ts`: about 60 fixed citizens with name, age, gender, personality (social, energy, outdoorPreference, workPreference: 0–100), home, workplace, family links (spouse, parents, children, siblings), friends. Families share a house, and every house and apartment in the town has somebody living in it (SPEC 2.4, decision 25).
 - Jobs per SPEC 2.4 mapped to buildings. Students → school. Retired → home/park.
 - `ScheduleSystem`: per-citizen daily template with ±10 min seeded jitter applied at day start.
 - `CitizenSystem` state machine: Sleep, Eat, Work, Walk, Drive (stub until Phase 4), Shop, Socialize, Relax, GoHome. Transitions based on time, schedule, personality thresholds (e.g. socialNeed > 70 → find social activity in a nearby zone).
