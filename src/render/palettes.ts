@@ -28,6 +28,11 @@ export interface TimePalette {
   sunColor: number;
   sunIntensity: number;
 
+  /**
+   * A warm light from the far side of the town, opposite the sun, that puts a
+   * rim on roofs and walls at dawn and dusk (DESIGN.md §11). Zero by day.
+   */
+  rimIntensity: number;
   /** How strongly street lamps and their pools of light show, 0 to 1. */
   lampFactor: number;
   /** How strongly lit windows show, 0 to 1. Daylight washes them out. */
@@ -49,6 +54,7 @@ export const TIME_PALETTES: readonly TimePalette[] = [
     ambientIntensity: 0.78,
     sunColor: 0xa7b8dc,
     sunIntensity: 0.3,
+    rimIntensity: 0,
     lampFactor: 1,
     windowFactor: 1,
   },
@@ -62,6 +68,7 @@ export const TIME_PALETTES: readonly TimePalette[] = [
     ambientIntensity: 0.8,
     sunColor: 0xa7b8dc,
     sunIntensity: 0.3,
+    rimIntensity: 0,
     lampFactor: 1,
     windowFactor: 1,
   },
@@ -75,6 +82,7 @@ export const TIME_PALETTES: readonly TimePalette[] = [
     ambientIntensity: 1.05,
     sunColor: 0xf7b98a,
     sunIntensity: 1.0,
+    rimIntensity: 0.55,
     lampFactor: 0.7,
     windowFactor: 0.85,
   },
@@ -88,6 +96,7 @@ export const TIME_PALETTES: readonly TimePalette[] = [
     ambientIntensity: 0.9,
     sunColor: 0xfff0d8,
     sunIntensity: 1.7,
+    rimIntensity: 0.15,
     lampFactor: 0,
     windowFactor: 0.14,
   },
@@ -101,6 +110,7 @@ export const TIME_PALETTES: readonly TimePalette[] = [
     ambientIntensity: 0.92,
     sunColor: 0xfff6e4,
     sunIntensity: 1.9,
+    rimIntensity: 0,
     lampFactor: 0,
     windowFactor: 0.05,
   },
@@ -114,6 +124,7 @@ export const TIME_PALETTES: readonly TimePalette[] = [
     ambientIntensity: 0.92,
     sunColor: 0xffd9a3,
     sunIntensity: 1.6,
+    rimIntensity: 0.35,
     lampFactor: 0,
     windowFactor: 0.3,
   },
@@ -127,6 +138,7 @@ export const TIME_PALETTES: readonly TimePalette[] = [
     ambientIntensity: 1.3,
     sunColor: 0xf7a06a,
     sunIntensity: 1.4,
+    rimIntensity: 0.7,
     lampFactor: 0.85,
     windowFactor: 0.92,
   },
@@ -140,6 +152,7 @@ export const TIME_PALETTES: readonly TimePalette[] = [
     ambientIntensity: 0.95,
     sunColor: 0xa7b8dc,
     sunIntensity: 0.38,
+    rimIntensity: 0.15,
     lampFactor: 1,
     windowFactor: 1,
   },

@@ -87,6 +87,8 @@ export interface EnvironmentState {
  */
 export class Environment {
   readonly sun: DirectionalLight;
+  /** Warm light from behind the town, opposite the sun; see TimePalette.rimIntensity. */
+  private readonly rim: DirectionalLight;
 
   private readonly hemisphere: HemisphereLight;
   private readonly skyMaterial: ShaderMaterial;
@@ -144,6 +146,10 @@ export class Environment {
     this.sun.shadow.camera.updateProjectionMatrix();
     scene.add(this.sun);
     scene.add(this.sun.target);
+
+    this.rim = new DirectionalLight(0xffb27a, 0);
+    scene.add(this.rim);
+    scene.add(this.rim.target);
   }
 
   /**
@@ -190,6 +196,14 @@ export class Environment {
       Math.sin(azimuth) * Math.cos(elevation) * SUN_DISTANCE,
     );
 
+    // The rim sits low on the far side, so it catches edges the sun does not.
+    this.rim.intensity = palette.rimIntensity;
+    this.rim.position.set(
+      -Math.cos(azimuth) * SUN_DISTANCE,
+      SUN_DISTANCE * 0.25,
+      -Math.sin(azimuth) * SUN_DISTANCE,
+    );
+
     this.state.lampFactor = palette.lampFactor;
     this.state.windowFactor = palette.windowFactor;
   }
@@ -224,6 +238,7 @@ export function paletteAt(minuteOfDay: number): TimePalette {
     ambientIntensity: mix(from.ambientIntensity, to.ambientIntensity, t),
     sunColor: mixHex(from.sunColor, to.sunColor, t),
     sunIntensity: mix(from.sunIntensity, to.sunIntensity, t),
+    rimIntensity: mix(from.rimIntensity, to.rimIntensity, t),
     lampFactor: mix(from.lampFactor, to.lampFactor, t),
     windowFactor: mix(from.windowFactor, to.windowFactor, t),
   };

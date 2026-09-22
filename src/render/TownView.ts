@@ -4,6 +4,7 @@ import {
   Color,
   ConeGeometry,
   CylinderGeometry,
+  DataTexture,
   DoubleSide,
   ExtrudeGeometry,
   Group,
@@ -16,7 +17,10 @@ import {
   Object3D,
   PlaneGeometry,
   Shape,
+  RepeatWrapping,
+  RGBAFormat,
   SphereGeometry,
+  SRGBColorSpace,
   TorusGeometry,
   type Sprite,
 } from 'three';
@@ -155,7 +159,11 @@ export class TownView {
   }
 
   private addGround(): void {
-    const ground = new Mesh(new PlaneGeometry(GROUND_SIZE, GROUND_SIZE), matte(COLOR.grass));
+    // A faint blotch of two greens keeps the grass from reading as one flat
+    // fill, which is the surest sign of a machine-made scene (DESIGN.md §16).
+    const material = matte(COLOR.grass);
+    material.map = grassTexture();
+    const ground = new Mesh(new PlaneGeometry(GROUND_SIZE, GROUND_SIZE), material);
     ground.rotation.x = -Math.PI / 2;
     ground.receiveShadow = true;
     ground.name = 'ground';
@@ -453,7 +461,7 @@ export class TownView {
     group.rotation.y = building.rotationY;
     group.name = building.id;
 
-    const wallMaterial = matte(wallColor(building));
+    const wallMaterial = matte(jitter(wallColor(building), building.id));
     const walls = new Mesh(
       new RoundedBoxGeometry(building.width, building.wallHeight, building.depth, 3, ROUNDING),
       wallMaterial,
@@ -464,6 +472,7 @@ export class TownView {
     group.add(walls);
 
     group.add(roofFor(building));
+    this.addRoofTrim(group, building);
 
     const windowMaterial = new MeshStandardMaterial({
       color: COLOR.glass,
@@ -484,6 +493,17 @@ export class TownView {
       frame.position.set(placement.x, placement.y, placement.z);
       frame.rotation.y = placement.rotationY;
       group.add(frame);
+
+      // A sill below each window: a small ledge that catches light and shadow.
+      const sill = new Mesh(new BoxGeometry(placement.width + 0.4, 0.1, 0.28), frameMaterial);
+      sill.position.set(
+        placement.x + placement.normalX * 0.1,
+        placement.y - placement.height / 2 - 0.12,
+        placement.z + placement.normalZ * 0.1,
+      );
+      sill.rotation.y = placement.rotationY;
+      sill.castShadow = true;
+      group.add(sill);
 
       const pane = new Mesh(new PlaneGeometry(placement.width, placement.height), windowMaterial);
       pane.position.set(
@@ -523,6 +543,14 @@ export class TownView {
     );
     door.position.set(0, doorHeight / 2, building.depth / 2 + 0.06);
     group.add(door);
+
+    const step = new Mesh(
+      new RoundedBoxGeometry(doorWidth + 0.8, 0.16, 0.9, 2, 0.05),
+      matte(COLOR.pavement),
+    );
+    step.position.set(0, 0.08, building.depth / 2 + 0.5);
+    step.receiveShadow = true;
+    group.add(step);
 
     if (building.kind === 'cafe' || building.kind === 'bakery') {
       const awning = new Mesh(
@@ -567,6 +595,57 @@ export class TownView {
       );
       sign.position.set(0, building.wallHeight - 1.4, building.depth / 2 + 0.15);
       group.add(sign);
+    }
+  }
+
+  /**
+   * What sits on and under a roof: a fascia board along the eaves, a ridge
+   * cap on a pitched roof, and a chimney on every other house. Small parts,
+   * but they are what make a roof look assembled rather than extruded.
+   */
+  private addRoofTrim(group: Group, building: Building): void {
+    const style = building.style;
+    const trim = matte(style?.trimColor ?? COLOR.ivory);
+    const pitched =
+      style?.roofKind === 'gable' || style?.roofKind === 'hip' || building.kind === 'bakery';
+
+    if (pitched) {
+      const fascia = new Mesh(
+        new BoxGeometry(building.width + 1.1, 0.22, building.depth + 1.1),
+        trim,
+      );
+      fascia.position.y = building.wallHeight - 0.04;
+      fascia.castShadow = true;
+      group.add(fascia);
+    }
+
+    if (style?.roofKind === 'gable') {
+      const ridge = new Mesh(
+        new RoundedBoxGeometry(0.34, 0.22, building.depth + 1.2, 2, 0.08),
+        matte(darken(style.roofColor, 0.82)),
+      );
+      ridge.position.y = building.wallHeight + building.roofHeight - 0.02;
+      group.add(ridge);
+    }
+
+    const houseNumber = Number(building.id.slice(-2));
+    if (building.kind === 'house' && pitched && houseNumber % 2 === 0) {
+      const chimney = new Mesh(
+        new RoundedBoxGeometry(0.7, 1.6, 0.7, 2, 0.08),
+        matte(darken(style?.wallColor ?? COLOR.ivory, 0.8)),
+      );
+      // Off centre and towards the back, so it clears the ridge.
+      chimney.position.set(
+        building.width * 0.28,
+        building.wallHeight + building.roofHeight * 0.55 + 0.5,
+        -building.depth * 0.18,
+      );
+      chimney.castShadow = true;
+      group.add(chimney);
+
+      const pot = new Mesh(new CylinderGeometry(0.16, 0.16, 0.4, 10), matte(0x8a5a48));
+      pot.position.set(chimney.position.x, chimney.position.y + 0.95, chimney.position.z);
+      group.add(pot);
     }
   }
 
@@ -1057,6 +1136,70 @@ function flowerBed(
   group.add(blooms);
 
   return group;
+}
+
+/**
+ * Nudges a colour by a hair, keyed on a name, so two walls of the same paint
+ * are never exactly the same shade. Deliberately tiny.
+ */
+function jitter(color: number, key: string): number {
+  let hash = 2166136261;
+  for (let i = 0; i < key.length; i += 1) {
+    hash = Math.imul(hash ^ key.charCodeAt(i), 16777619);
+  }
+  const unit = ((hash >>> 0) % 1000) / 1000 - 0.5;
+  return new Color(color).offsetHSL(unit * 0.01, unit * 0.04, unit * 0.05).getHex();
+}
+
+function darken(color: number, factor: number): number {
+  return new Color(color).multiplyScalar(factor).getHex();
+}
+
+let sharedGrassTexture: DataTexture | undefined;
+
+/** A soft, low frequency blotch of two greens, tiled over the ground. */
+function grassTexture(): DataTexture {
+  if (sharedGrassTexture) {
+    return sharedGrassTexture;
+  }
+  const size = 64;
+  const data = new Uint8Array(size * size * 4);
+  const rng = new Rng('grass');
+  // Value noise: a coarse grid of random values, smoothly interpolated.
+  const cells = 6;
+  const grid: number[] = [];
+  for (let i = 0; i < (cells + 1) * (cells + 1); i += 1) {
+    grid.push(rng.next());
+  }
+  const smooth = (t: number): number => t * t * (3 - 2 * t);
+  for (let y = 0; y < size; y += 1) {
+    for (let x = 0; x < size; x += 1) {
+      const gx = (x / size) * cells;
+      const gy = (y / size) * cells;
+      const x0 = Math.floor(gx) % cells;
+      const y0 = Math.floor(gy) % cells;
+      const tx = smooth(gx - Math.floor(gx));
+      const ty = smooth(gy - Math.floor(gy));
+      const at = (cx: number, cy: number): number =>
+        grid[(cy % cells) * (cells + 1) + (cx % cells)];
+      const top = at(x0, y0) * (1 - tx) + at(x0 + 1, y0) * tx;
+      const bottom = at(x0, y0 + 1) * (1 - tx) + at(x0 + 1, y0 + 1) * tx;
+      // Keep the swing small: the grass is one colour with a breath in it.
+      const value = 240 + (top * (1 - ty) + bottom * ty - 0.5) * 12;
+      const index = (y * size + x) * 4;
+      data[index] = value;
+      data[index + 1] = value;
+      data[index + 2] = value;
+      data[index + 3] = 255;
+    }
+  }
+  sharedGrassTexture = new DataTexture(data, size, size, RGBAFormat);
+  sharedGrassTexture.wrapS = RepeatWrapping;
+  sharedGrassTexture.wrapT = RepeatWrapping;
+  sharedGrassTexture.repeat.set(GROUND_SIZE / 48, GROUND_SIZE / 48);
+  sharedGrassTexture.colorSpace = SRGBColorSpace;
+  sharedGrassTexture.needsUpdate = true;
+  return sharedGrassTexture;
 }
 
 /** A matte material: rough, no metal, the whole town is made of it (DESIGN.md §16). */

@@ -22,6 +22,10 @@
   layout bounds with the haze starting beyond the far side of the town.
 - Citizens are miniature people built from parts — head, hair cap, torso, arms, legs —
   with a procedural walk that swings the legs and arms. Idle gestures wait for Phase 3.
+- Second pass, after review: a warm rim light from behind the town at dawn and dusk
+  (`rimIntensity` in the palettes); fascia boards under the eaves, ridge caps on gables,
+  chimneys on every other house, window sills and door steps; a hair of hue variation per
+  wall; and a faint two-green breath in the grass so the ground is not one flat fill.
 
 ## Phase 2 — Full map and navigation graph
 
