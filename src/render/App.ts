@@ -20,6 +20,7 @@ import { townBounds } from '../world/Town.js';
 import { CitizenView } from './CitizenView.js';
 import { DebugView } from './DebugView.js';
 import { Environment } from './Environment.js';
+import { Scenery } from './Scenery.js';
 import { TownView } from './TownView.js';
 import { VehicleView } from './VehicleView.js';
 
@@ -88,6 +89,7 @@ export class App {
   private readonly clock = new Clock();
 
   private readonly environment: Environment;
+  private readonly scenery = new Scenery();
   private readonly townView = new TownView();
   private readonly citizenView: CitizenView;
   private readonly vehicleView: VehicleView;
@@ -112,12 +114,13 @@ export class App {
     this.renderer.toneMappingExposure = 1.05;
     container.appendChild(this.renderer.domElement);
 
-    this.camera = new PerspectiveCamera(42, this.aspectRatio(), 0.5, 900);
+    this.camera = new PerspectiveCamera(42, this.aspectRatio(), 0.5, 2500);
     this.controls = this.createControls();
     this.environment = new Environment(this.scene);
     this.frameTown();
     this.citizenView = new CitizenView(world);
     this.vehicleView = new VehicleView(world);
+    this.scene.add(this.scenery.root);
     this.scene.add(this.townView.root);
     this.scene.add(this.citizenView.root);
     this.scene.add(this.vehicleView.root);
@@ -128,7 +131,8 @@ export class App {
     }
 
     // Draw the town in its opening light before the first frame runs.
-    this.environment.update(world.time.minuteOfDay);
+    this.environment.update(world.time.minuteOfDay, 0);
+    this.scenery.update(this.environment.state, 0, this.camera.position);
     this.townView.update(world, this.environment.state, 10, this.camera);
     this.citizenView.update(10);
     this.vehicleView.update(this.environment.state, 10, this.camera);
@@ -284,7 +288,10 @@ export class App {
     const deltaSeconds = this.clock.getDelta();
     this.world.tickMany(this.scheduler.ticksForFrame(deltaSeconds));
 
-    this.environment.update(this.world.time.minuteOfDay);
+    // Real elapsed time drives clouds, swell and twinkle only; the
+    // simulation never sees it (SPEC.md 2.14).
+    this.environment.update(this.world.time.minuteOfDay, this.clock.elapsedTime);
+    this.scenery.update(this.environment.state, this.clock.elapsedTime, this.camera.position);
     this.townView.update(this.world, this.environment.state, deltaSeconds, this.camera);
     this.citizenView.update(deltaSeconds);
     this.vehicleView.update(this.environment.state, deltaSeconds, this.camera);

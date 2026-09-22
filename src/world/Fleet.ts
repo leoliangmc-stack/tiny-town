@@ -34,6 +34,12 @@ export const FLEET: readonly VehicleTemplate[] = [
   { id: 'van-2', kind: 'van', color: 0xe6a15c, workplaceId: 'supermarket', driverId: 'sven' },
 ];
 
+/**
+ * Car owners who take the car out again in the evening, so headlights cross
+ * the dark streets (SPEC.md 2.14). Lucia likes the cafe; Mateo has the energy.
+ */
+export const NIGHT_OUT_IDS: readonly string[] = ['lucia', 'mateo'];
+
 /** Metres per game minute: comfortably faster than a walker's 4.4. */
 export const VEHICLE_SPEED: Record<VehicleKind, number> = {
   car: 18,

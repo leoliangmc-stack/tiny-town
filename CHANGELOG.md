@@ -1,5 +1,33 @@
 # Changelog
 
+## Phase 4.6 — Environment and sky
+
+- `render/Scenery.ts`: the place around the town. A sea to the north behind a curved
+  beach (`coastZ`), drawn as one shader plane: a deep colour that shallows towards the
+  sand, a faint slow swell, a foam line along the shore, and a band of glint stretched
+  towards the sun or the moon. A forest on the three landward sides as three instanced
+  meshes (trunks, round crowns, pines, about 900 trees), a ring of hills and a ring of
+  mountains behind, each one mesh whose ridge wanders in height and distance, with the
+  ridge dropping away over the water so the sea reaches the horizon between headlands.
+  Seven draw calls, none casting shadows; all of it under the fog so distance reads as haze.
+- `render/Environment.ts`: the sky dome now draws the whole sky in one shader: the
+  gradient, a sun disc with a halo, drifting clouds lit from the sun's side, and at night
+  stars that twinkle, a faint Milky Way arching over the sea, and a moon with a shaded
+  edge and a halo. Every colour comes from the palette stops, which gained sea, cloud,
+  sun, star and moon fields, so dawn gold, noon blue, dusk orange and the night's moon
+  path fall out of the same eight stops. The moon crosses the northern sky, over the
+  water, so its glint lies in the default view.
+- The camera's far plane moved from 900 to 2,500 m so the dome is never clipped when the
+  camera sits off centre.
+- The sea shader blends the fog after tone mapping, as Three.js's own materials do,
+  so haze on the water matches haze on the hills.
+- `world/Fleet.ts` and `ScheduleSystem`: Lucia and Mateo drive out to the cafe most
+  evenings, so headlights cross the dark streets after the last commute.
+- Cloud drift, swell and twinkle are render side animation driven by real time; nothing
+  here is read by the simulation or the state hash.
+- Draw calls 214 → 221 (sky already counted, plus sea, beach, hills, mountains and three
+  forest meshes); p95 frame time unchanged at about 18.8 ms on an M4 at 2x.
+
 ## Phase 4 — Vehicles
 
 - `world/Fleet.ts`: eight vehicles. Six private cars to the six longest commutes among the

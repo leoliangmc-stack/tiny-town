@@ -37,6 +37,18 @@ export interface TimePalette {
   lampFactor: number;
   /** How strongly lit windows show, 0 to 1. Daylight washes them out. */
   windowFactor: number;
+
+  /** The sea: its deep colour, its colour near the sand, and the glint it throws. */
+  seaDeep: number;
+  seaShallow: number;
+  seaGlint: number;
+  /** Clouds: the side facing the light, and the side away from it. */
+  cloudLit: number;
+  cloudShade: number;
+  /** How visible the sun disc, the stars and the moon are, 0 to 1. */
+  sunStrength: number;
+  starStrength: number;
+  moonStrength: number;
 }
 
 /**
@@ -57,6 +69,14 @@ export const TIME_PALETTES: readonly TimePalette[] = [
     rimIntensity: 0,
     lampFactor: 1,
     windowFactor: 1,
+    seaDeep: 0x0f1a30,
+    seaShallow: 0x1d2c48,
+    seaGlint: 0xbfcbe8,
+    cloudLit: 0x2a3554,
+    cloudShade: 0x121a30,
+    sunStrength: 0,
+    starStrength: 1,
+    moonStrength: 1,
   },
   {
     minuteOfDay: 4 * 60 + 40,
@@ -71,6 +91,14 @@ export const TIME_PALETTES: readonly TimePalette[] = [
     rimIntensity: 0,
     lampFactor: 1,
     windowFactor: 1,
+    seaDeep: 0x111c33,
+    seaShallow: 0x20304d,
+    seaGlint: 0xbfcbe8,
+    cloudLit: 0x2e3a5b,
+    cloudShade: 0x151d34,
+    sunStrength: 0,
+    starStrength: 0.9,
+    moonStrength: 0.9,
   },
   {
     minuteOfDay: 5 * 60 + 55,
@@ -85,11 +113,19 @@ export const TIME_PALETTES: readonly TimePalette[] = [
     rimIntensity: 0.55,
     lampFactor: 0.7,
     windowFactor: 0.85,
+    seaDeep: 0x35507a,
+    seaShallow: 0x6f8aa8,
+    seaGlint: 0xffc48a,
+    cloudLit: 0xf2b58c,
+    cloudShade: 0x6a6f95,
+    sunStrength: 0.9,
+    starStrength: 0.15,
+    moonStrength: 0.2,
   },
   {
     minuteOfDay: 7 * 60 + 20,
     name: 'morning',
-    skyTop: 0x8fb4d8,
+    skyTop: 0x7aa8d4,
     skyHorizon: 0xdde8ee,
     ambientSky: 0xc3d3e4,
     ambientGround: 0x8a8a72,
@@ -99,11 +135,19 @@ export const TIME_PALETTES: readonly TimePalette[] = [
     rimIntensity: 0.15,
     lampFactor: 0,
     windowFactor: 0.14,
+    seaDeep: 0x3f6d92,
+    seaShallow: 0x83adc0,
+    seaGlint: 0xfff2d8,
+    cloudLit: 0xfbf7f0,
+    cloudShade: 0xaebdcf,
+    sunStrength: 1,
+    starStrength: 0,
+    moonStrength: 0,
   },
   {
     minuteOfDay: 12 * 60 + 30,
     name: 'day',
-    skyTop: 0x6fa2d0,
+    skyTop: 0x5893cc,
     skyHorizon: 0xd3e2ec,
     ambientSky: 0xcfdcea,
     ambientGround: 0x939577,
@@ -113,11 +157,19 @@ export const TIME_PALETTES: readonly TimePalette[] = [
     rimIntensity: 0,
     lampFactor: 0,
     windowFactor: 0.05,
+    seaDeep: 0x3b6b92,
+    seaShallow: 0x80b0c4,
+    seaGlint: 0xffffff,
+    cloudLit: 0xffffff,
+    cloudShade: 0xb0c1d3,
+    sunStrength: 1,
+    starStrength: 0,
+    moonStrength: 0,
   },
   {
     minuteOfDay: 17 * 60 + 40,
     name: 'golden hour',
-    skyTop: 0x86a6cc,
+    skyTop: 0x7a9fc9,
     skyHorizon: 0xecd2ad,
     ambientSky: 0xcfd1d8,
     ambientGround: 0x8f7d63,
@@ -127,6 +179,14 @@ export const TIME_PALETTES: readonly TimePalette[] = [
     rimIntensity: 0.35,
     lampFactor: 0,
     windowFactor: 0.3,
+    seaDeep: 0x3e6590,
+    seaShallow: 0x8aa8bc,
+    seaGlint: 0xffd9a0,
+    cloudLit: 0xfde3bd,
+    cloudShade: 0xb6b3c4,
+    sunStrength: 1,
+    starStrength: 0,
+    moonStrength: 0,
   },
   {
     minuteOfDay: 19 * 60 + 15,
@@ -141,6 +201,14 @@ export const TIME_PALETTES: readonly TimePalette[] = [
     rimIntensity: 0.7,
     lampFactor: 0.85,
     windowFactor: 0.92,
+    seaDeep: 0x2f3f6e,
+    seaShallow: 0x6c7a9c,
+    seaGlint: 0xffa66a,
+    cloudLit: 0xf7a978,
+    cloudShade: 0x5c5a86,
+    sunStrength: 0.85,
+    starStrength: 0.2,
+    moonStrength: 0.3,
   },
   {
     minuteOfDay: 20 * 60 + 45,
@@ -155,6 +223,14 @@ export const TIME_PALETTES: readonly TimePalette[] = [
     rimIntensity: 0.15,
     lampFactor: 1,
     windowFactor: 1,
+    seaDeep: 0x162441,
+    seaShallow: 0x2c3c60,
+    seaGlint: 0xc8d2ec,
+    cloudLit: 0x3a4670,
+    cloudShade: 0x1a2340,
+    sunStrength: 0,
+    starStrength: 0.85,
+    moonStrength: 0.9,
   },
 ];
 

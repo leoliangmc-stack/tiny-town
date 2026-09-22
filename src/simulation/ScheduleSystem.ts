@@ -1,4 +1,5 @@
 import type { Appointment, Citizen, Job } from '../entities/Citizen.js';
+import { NIGHT_OUT_IDS } from '../world/Fleet.js';
 import { CAFE_ID, HOUSES } from '../world/Town.js';
 
 import { Rng } from './Rng.js';
@@ -208,8 +209,22 @@ export class ScheduleSystem {
     });
 
     const sleep = template.sleep + jitter();
+    // A couple of car owners drive out to the cafe after dark most evenings.
+    if (NIGHT_OUT_IDS.includes(citizen.id) && rng.next() < 0.7) {
+      plan.push({
+        at: minute(20, 15) + jitter(),
+        activity: 'Socialize',
+        place: { kind: 'zone', id: CAFE_ZONE_ID },
+        duration: 25,
+        note: `${citizen.name} drove out to the cafe for the evening.`,
+      });
+    }
     // Sociable people go out again after dinner, if there is time before bed.
-    if (citizen.personality.social > 70 && citizen.age >= 16 && sleep - template.dinner > 150) {
+    else if (
+      citizen.personality.social > 70 &&
+      citizen.age >= 16 &&
+      sleep - template.dinner > 150
+    ) {
       plan.push({
         at: template.dinner + 55 + jitter(),
         activity: 'Socialize',
