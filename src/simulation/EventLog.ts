@@ -35,8 +35,15 @@ export class EventLog {
       this.day = day;
       this.countToday = 0;
     }
-    const cap = priority === 'colour' ? COLOUR_CAP : ENTRIES_PER_DAY;
-    if (priority !== 'always' && this.countToday >= cap) {
+    // Milestones stop one short of the day's limit so the one line that must
+    // not be lost still fits.
+    const cap =
+      priority === 'colour'
+        ? COLOUR_CAP
+        : priority === 'milestone'
+          ? ENTRIES_PER_DAY - 1
+          : ENTRIES_PER_DAY;
+    if (this.countToday >= cap) {
       return;
     }
     this.entries.push({ day, minute, text });

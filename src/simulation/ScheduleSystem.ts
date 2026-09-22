@@ -224,9 +224,12 @@ export class ScheduleSystem {
     workplace: { kind: 'building'; id: string },
     plan: Appointment[],
   ): void {
+    // Each driver has their own slot within the hour, so the rounds are
+    // spread out rather than three vans leaving in the same eight minutes.
+    const slot = (hashText(citizen.id) % 4) * 18;
     for (const start of [minute(9, 0), minute(14, 0)]) {
       const house = rng.pick(HOUSES);
-      const at = start + rng.nextFloat(-10, 10);
+      const at = start + slot + rng.nextFloat(-6, 6);
       plan.push({
         at,
         activity: 'Work',
@@ -326,6 +329,15 @@ export class ScheduleSystem {
     }
     plan.push({ at: minute(16, 45), activity: 'Relax', place: home, duration: 0 });
   }
+}
+
+/** A small stable hash, for spreading drivers over the hour. */
+function hashText(text: string): number {
+  let hash = 2166136261;
+  for (let i = 0; i < text.length; i += 1) {
+    hash = Math.imul(hash ^ text.charCodeAt(i), 16777619);
+  }
+  return hash >>> 0;
 }
 
 export { CAFE_ID };

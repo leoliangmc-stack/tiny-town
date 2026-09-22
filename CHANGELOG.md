@@ -1,22 +1,25 @@
 # Changelog
 
-## Phase 3 — 40 citizens and the schedule system
+## Phase 3 — 60 citizens and the schedule system
 
-- `world/Population.ts`: forty fixed citizens in sixteen households, each with name, age,
-  gender, job, four personality traits, home, workplace, family links both ways and a few
-  friends (colleagues plus hand picked pairs). Jobs map to buildings per SPEC 2.4; doctors
-  practise from the office block.
+- `world/Population.ts`: sixty-three fixed citizens in thirty-three households, one per
+  house and apartment, each with name, age, gender, job, four personality traits, home,
+  workplace, family links both ways and a few friends (colleagues plus hand picked pairs).
+  Jobs map to buildings per SPEC 2.4; doctors practise from the office block. The first
+  forty were written first and the other twenty-three added to fill the empty houses
+  (decision 25), not regenerated.
 - `ScheduleSystem`: a written day per job, copied each morning with ±10 minutes of seeded
   jitter and a few choices tilted by personality: lunch outside, the cafe after work, the
   park for the retired. Leave times are worked out from the real route length. Delivery
-  drivers walk two rounds a day to houses until Phase 4 gives them a van.
+  drivers walk two rounds a day to houses until Phase 4 gives them a van, each in their own
+  slot of the hour so the vans do not all leave together.
 - `CitizenSystem`: appointments started when due, walking there on the pavement graph
   first; an open-ended activity yields to the next appointment, a timed one is seen
   through; a finished errand leads home; a social need that climbs while alone sends
   people out to the cafe terrace on a whim. Everyone stands on their own spawn point in a
   zone. All nine activities from SPEC 2.4; `Drive` is present but unused until Phase 4.
-- Windows are lit by who is really at home and awake. `HouseholdLights.ts` is gone. Seventeen
-  of the thirty houses have nobody living in them and stay dark.
+- Windows are lit by who is really at home and awake. `HouseholdLights.ts` is gone, and no
+  house is empty, so every window in town takes part in the evening.
 - `EventLog`: causes and milestones as full sentences, at most fifteen a day, with colour
   lines (a walk to the park) giving way to milestones (running into a friend, arriving
   late) and the last light going out always written.

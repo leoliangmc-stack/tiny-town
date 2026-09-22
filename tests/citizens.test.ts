@@ -33,6 +33,29 @@ describe('the population', () => {
     }
   });
 
+  it('puts somebody in every house and apartment', () => {
+    expect(world.emptyHouseIds).toEqual([]);
+    const homes = new Set(world.citizens.map((citizen) => citizen.homeId));
+    for (const building of BUILDINGS) {
+      if (building.kind === 'house' || building.kind === 'apartment') {
+        expect(homes.has(building.id), building.id).toBe(true);
+      }
+    }
+  });
+
+  it('keeps the workplaces to a sensible size', () => {
+    const counts = new Map<string, number>();
+    for (const citizen of world.citizens) {
+      if (citizen.workplaceId && citizen.job !== 'Student') {
+        counts.set(citizen.workplaceId, (counts.get(citizen.workplaceId) ?? 0) + 1);
+      }
+    }
+    for (const [workplace, count] of counts) {
+      expect(count, workplace).toBeLessThanOrEqual(16);
+      expect(count, workplace).toBeGreaterThanOrEqual(3);
+    }
+  });
+
   it('gives every job a workplace that exists, except the retired', () => {
     for (const citizen of world.citizens) {
       const expected = WORKPLACE_BY_JOB[citizen.job];
@@ -242,15 +265,13 @@ describe('a single day', () => {
     }
   });
 
-  it('lights homes by who is really in, and leaves empty houses dark', () => {
+  it('lights most homes in the evening, by who is really in', () => {
     const world = new World({ seed: 'phase-3-day' });
     runUntil(world, 2, 20 * 60);
 
-    const lit = BUILDINGS.filter((b) => b.kind === 'house' && world.isLit(b.id)).map((b) => b.id);
-    expect(lit.length).toBeGreaterThan(5);
-    for (const id of world.emptyHouseIds) {
-      expect(lit).not.toContain(id);
-    }
+    const homes = BUILDINGS.filter((b) => b.kind === 'house' || b.kind === 'apartment');
+    const lit = homes.filter((b) => world.isLit(b.id));
+    expect(lit.length / homes.length).toBeGreaterThan(0.6);
   });
 
   it('turns the lights out one by one after bedtime', () => {

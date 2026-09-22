@@ -187,9 +187,100 @@ export const HOUSEHOLDS: readonly Household[] = [
       p('luca', 'Luca', 26, 'male', 'Delivery Driver', 60, 75, 70, 60),
     ],
   },
+
+  // --- The other seventeen houses (decision 25: nobody's home stays dark) ---
+  {
+    homeId: 'house-02',
+    couple: ['ana', 'mateo'],
+    members: [
+      p('ana', 'Ana', 34, 'female', 'Cafe Worker', 80, 65, 55, 60),
+      p('mateo', 'Mateo', 36, 'male', 'Office Worker', 55, 60, 45, 75),
+    ],
+  },
+  {
+    homeId: 'house-04',
+    members: [p('bruno', 'Bruno', 64, 'male', 'Retired', 40, 45, 85, 25)],
+  },
+  {
+    homeId: 'house-05',
+    members: [p('kenji', 'Kenji', 31, 'male', 'Shopkeeper', 45, 70, 40, 85)],
+  },
+  {
+    homeId: 'house-07',
+    couple: ['priya', 'arjun'],
+    members: [
+      p('priya', 'Priya', 40, 'female', 'Office Worker', 65, 60, 50, 80),
+      p('arjun', 'Arjun', 42, 'male', 'Delivery Driver', 50, 70, 65, 65),
+      p('dev', 'Dev', 12, 'male', 'Student', 75, 90, 85, 40),
+    ],
+  },
+  {
+    homeId: 'house-09',
+    members: [p('ingrid', 'Ingrid', 75, 'female', 'Retired', 60, 30, 55, 15)],
+  },
+  {
+    homeId: 'house-10',
+    couple: ['marco', 'lucia'],
+    members: [
+      p('marco', 'Marco', 46, 'male', 'Baker', 50, 75, 45, 80),
+      p('lucia', 'Lucia', 45, 'female', 'Shopkeeper', 70, 60, 50, 75),
+    ],
+  },
+  {
+    homeId: 'house-12',
+    members: [p('yusuf', 'Yusuf', 57, 'male', 'Office Worker', 35, 50, 40, 70)],
+  },
+  {
+    homeId: 'house-15',
+    members: [p('tessa', 'Tessa', 23, 'female', 'Cafe Worker', 90, 80, 65, 50)],
+  },
+  {
+    homeId: 'house-17',
+    members: [p('erik', 'Erik', 69, 'male', 'Retired', 55, 40, 75, 20)],
+  },
+  {
+    homeId: 'house-19',
+    members: [p('wren', 'Wren', 33, 'female', 'Teacher', 70, 65, 70, 75)],
+  },
+  {
+    homeId: 'house-20',
+    members: [p('rosa', 'Rosa', 62, 'female', 'Retired', 75, 45, 60, 25)],
+  },
+  {
+    homeId: 'house-22',
+    couple: ['sven', 'freya'],
+    members: [
+      p('sven', 'Sven', 38, 'male', 'Delivery Driver', 45, 75, 70, 60),
+      p('freya', 'Freya', 37, 'female', 'Cafe Worker', 80, 70, 60, 55),
+    ],
+  },
+  {
+    homeId: 'house-23',
+    members: [p('omar', 'Omar', 49, 'male', 'Teacher', 55, 55, 50, 80)],
+  },
+  {
+    homeId: 'house-24',
+    members: [p('chloe', 'Chloe', 27, 'female', 'Baker', 60, 80, 55, 75)],
+  },
+  {
+    homeId: 'house-26',
+    members: [p('ling', 'Ling', 71, 'female', 'Retired', 50, 35, 70, 20)],
+  },
+  {
+    homeId: 'house-27',
+    couple: ['diego', 'carla'],
+    members: [
+      p('diego', 'Diego', 44, 'male', 'Shopkeeper', 55, 60, 45, 80),
+      p('carla', 'Carla', 43, 'female', 'Doctor', 60, 60, 50, 90),
+    ],
+  },
+  {
+    homeId: 'house-29',
+    members: [p('maya', 'Maya', 52, 'female', 'Teacher', 65, 55, 60, 80)],
+  },
 ];
 
-export const POPULATION_SIZE = 40;
+export const POPULATION_SIZE = 63;
 
 /** A few friendships beyond colleagues, so the social graph is not just work. */
 const FRIEND_PAIRS: ReadonlyArray<[string, string]> = [
@@ -207,6 +298,18 @@ const FRIEND_PAIRS: ReadonlyArray<[string, string]> = [
   ['finn', 'luca'],
   ['jonas', 'theo'],
   ['iris', 'elin'],
+  ['ana', 'tessa'],
+  ['bruno', 'erik'],
+  ['ingrid', 'ling'],
+  ['rosa', 'ruth'],
+  ['kenji', 'diego'],
+  ['dev', 'max'],
+  ['wren', 'sarah'],
+  ['omar', 'walter'],
+  ['chloe', 'nora'],
+  ['sven', 'paul'],
+  ['priya', 'iris'],
+  ['marco', 'tom'],
 ];
 
 const SKIN_COLORS = [0xe9c2a0, 0xd5a27a, 0xf0d2b4, 0xa4704f, 0xc48b66, 0x8d5a3b];
