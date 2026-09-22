@@ -1,6 +1,6 @@
 # Tiny Town — Development Phases
 
-Companion to `SPEC.md` (the single source of truth for requirements). Each phase below is written so it can be pasted into a fresh Claude Code session as the task brief. Read `SPEC.md` first in every session.
+Companion to `SPEC.md` (the single source of truth for requirements) and `DESIGN.md` (the visual direction). Each phase below is written so it can be pasted into a fresh Claude Code session as the task brief. Read `SPEC.md` first in every session, and `DESIGN.md` before touching anything under `src/render/`.
 
 ## Working rules for every phase
 
@@ -79,6 +79,29 @@ Companion to `SPEC.md` (the single source of truth for requirements). Each phase
 - Headless test: for 30 days, all citizen positions are within tolerance of a graph edge or inside a building footprint.
 - Visual check on desktop and portrait phone: most of the town is visible at default zoom.
 
+## Phase 2.5 — Visual style pass and the bigger town
+
+**Goal.** Replace the low-poly placeholder look with the direction in `DESIGN.md`, and grow the town to the size in SPEC 2.3. Only what already exists is restyled here; people animation beyond walking, cars, weather and UI keep their own phases and follow this style when they arrive.
+
+**Scope.**
+
+- Town grows to about 30 houses plus 2–3 small apartment blocks. Streets extended and closed into a full grid so the outer blocks read as part of the town. Density does not drop.
+- Every house is visibly different: roof form and colour, wall colour, porch / balcony / fence / garden, and one or two signs of life (mailbox, flower pots, bin, bicycle). Variation is deterministic from the house number.
+- Buildings: rounded edges, smooth shading, matte materials, window frames, restrained trim. Public buildings each get one distinguishing feature.
+- Palette per `DESIGN.md` §10: warm, low saturation. Roads warm grey, pavements warm beige-grey, grass warm sage.
+- Light: soft shadows (lower shadow intensity, softer edges, stronger fill), warm rim at dusk, the night kept beautiful.
+- Plants: rounder, slightly oversized trees; shrubs and flower beds along streets and in gardens.
+- Camera default tilt: about 40° landscape, about 50° portrait (SPEC 2.9).
+- Citizens: the miniature body (head, hair, torso, arms, legs) with a procedural walk that moves the legs, replacing the capsule. Idle gestures wait for Phase 3.
+
+**Out of scope.** New behaviours, cars, weather, UI, and the decorative items listed in `IDEAS.md`.
+
+**Acceptance.**
+
+- All existing tests pass with the bigger layout; the navigation tests cover every entrance and parking space.
+- Dawn, day, dusk and night screenshots on desktop and portrait judged by the author against `DESIGN.md`.
+- No drop below the Phase 2 frame rate on desktop.
+
 ## Phase 3 — 40 citizens and the schedule system
 
 **Goal.** A fixed population living autonomous, slightly desynchronised days, driven by a rule-based state machine.
@@ -89,10 +112,11 @@ Companion to `SPEC.md` (the single source of truth for requirements). Each phase
 - Jobs per SPEC 2.4 mapped to buildings. Students → school. Retired → home/park.
 - `ScheduleSystem`: per-citizen daily template with ±10 min seeded jitter applied at day start.
 - `CitizenSystem` state machine: Sleep, Eat, Work, Walk, Drive (stub until Phase 4), Shop, Socialize, Relax, GoHome. Transitions based on time, schedule, personality thresholds (e.g. socialNeed > 70 → find social activity in a nearby zone).
+- Miniature people per `DESIGN.md` §5–6: hairstyle, clothing colour, body shape and age variation; idle gestures (look around, turn, phone), and the simplest possible versions of talking, shopping (a bag), eating and working motions where a behaviour needs them. Procedural part animation only.
 - Outdoor zones populated: a portion of workers/students spend part of the day in their building's outdoor zone.
 - Window lights now driven by real occupancy.
 - `EventLog`: records causal and milestone events only, as full sentences. Cap ~15 per day.
-- Rendering: instanced capsule citizens with per-instance color.
+- Rendering: instanced citizen parts with per-instance colour.
 
 **Out of scope.** Cars actually driving (citizens who would drive walk for now), weather, UI.
 

@@ -9,3 +9,7 @@ without first moving it into `SPEC.md` and `PHASES.md`.
   dependency is acceptable in CI.
 - Garden paths from each front door to the pavement, to explain the route citizens walk
   across the grass.
+- From `DESIGN.md`, not scheduled for v1: a small fountain in the park, a basketball hoop
+  at the school, a chalkboard and parasols at the cafe, washing lines, school bags, taxis,
+  puddles and drips from eaves in rain, wet-road reflections of car lights, a vegetable
+  patch.

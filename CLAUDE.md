@@ -8,6 +8,8 @@ A 3D tiny town that lives by itself, built with Vite, TypeScript and Three.js.
   way. If a feature and the SPEC disagree, the SPEC wins. If the SPEC needs to change, change
   the document before the code.
 - `PHASES.md` — the phase by phase development plan. One phase per session.
+- `DESIGN.md` — the visual direction (cozy living miniature). Read it before touching
+  anything under `src/render/`. It says how things look; the SPEC says what is built.
 - `IDEAS.md` — parking lot for anything that is not in the current phase.
 
 ## Hard rules
