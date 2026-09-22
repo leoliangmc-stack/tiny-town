@@ -9,9 +9,11 @@ import {
   ShaderMaterial,
   SphereGeometry,
   Vector3,
+  Vector4,
 } from 'three';
 
 import { MINUTES_PER_GAME_DAY } from '../simulation/constants.js';
+import { Rng } from '../simulation/Rng.js';
 
 import { SUNRISE_MINUTE, SUNSET_MINUTE, TIME_PALETTES, type TimePalette } from './palettes.js';
 
@@ -47,6 +49,51 @@ const SUN_DISTANCE = 220;
 /** The moon crosses the sky at this height through the night. */
 const MOON_ELEVATION = (30 * Math.PI) / 180;
 
+/**
+ * The leading stars of the night (DESIGN.md §20): the few that carry a bloom
+ * and a spike. They are placed once, with the seeded generator, and handed to
+ * the sky shader as uniforms; the thousands behind them come from hash grids
+ * inside the shader.
+ */
+const BRIGHT_STAR_COUNT = 48;
+
+/**
+ * Star colours by temperature, roughly in the proportions the naked eye meets
+ * them: blue-white, white, yellow-white, yellow-orange and orange-red. The
+ * shader carries the same table for the stars it makes itself.
+ */
+const STAR_COLORS: ReadonlyArray<{ upTo: number; color: [number, number, number] }> = [
+  { upTo: 0.12, color: [0.72, 0.82, 1.0] },
+  { upTo: 0.45, color: [0.96, 0.97, 1.0] },
+  { upTo: 0.75, color: [1.0, 0.95, 0.82] },
+  { upTo: 0.92, color: [1.0, 0.85, 0.6] },
+  { upTo: 1.0, color: [1.0, 0.62, 0.42] },
+];
+
+function starColor(t: number): Color {
+  const entry = STAR_COLORS.find((candidate) => t < candidate.upTo) ?? STAR_COLORS[4];
+  return new Color(...entry.color);
+}
+
+/** Direction, brightness and colour of the leading stars, in a fixed order. */
+function brightStars(): { directions: Vector4[]; colors: Color[] } {
+  const rng = new Rng('sky:bright-stars');
+  const directions: Vector4[] = [];
+  const colors: Color[] = [];
+  for (let k = 0; k < BRIGHT_STAR_COUNT; k += 1) {
+    const y = rng.nextFloat(0.12, 1);
+    const azimuth = rng.nextFloat(0, Math.PI * 2);
+    const radius = Math.sqrt(1 - y * y);
+    // A few blaze, most are merely bright.
+    const magnitude = Math.pow(rng.next(), 1.6);
+    directions.push(
+      new Vector4(Math.cos(azimuth) * radius, y, Math.sin(azimuth) * radius, magnitude),
+    );
+    colors.push(starColor(rng.next()));
+  }
+  return { directions, colors };
+}
+
 const SKY_VERTEX_SHADER = /* glsl */ `
   varying vec3 vWorldPosition;
 
@@ -76,6 +123,8 @@ const SKY_FRAGMENT_SHADER = /* glsl */ `
   uniform vec3 cloudShade;
   uniform float cloudCover;
   uniform float time;
+  uniform vec4 brightStars[BRIGHT_STAR_COUNT];
+  uniform vec3 brightColors[BRIGHT_STAR_COUNT];
   varying vec3 vWorldPosition;
 
   float hash(vec3 p) {
@@ -117,6 +166,73 @@ const SKY_FRAGMENT_SHADER = /* glsl */ `
     return smoothstep(radius - softness, radius, c);
   }
 
+  // Star colours by temperature; the same table as STAR_COLORS on the CPU.
+  vec3 starColor(float t) {
+    if (t < 0.12) return vec3(0.72, 0.82, 1.0);
+    if (t < 0.45) return vec3(0.96, 0.97, 1.0);
+    if (t < 0.75) return vec3(1.0, 0.95, 0.82);
+    if (t < 0.92) return vec3(1.0, 0.85, 0.6);
+    return vec3(1.0, 0.62, 0.42);
+  }
+
+  // Maps a direction onto one face of a cube: the face index and the
+  // coordinates on it, so a grid of cells on the face becomes a grid of
+  // patches on the sphere with no slivers. The inverse takes them back.
+  vec2 cubeFace(vec3 dir, out float face) {
+    vec3 a = abs(dir);
+    if (a.x >= a.y && a.x >= a.z) {
+      face = dir.x > 0.0 ? 0.0 : 1.0;
+      return dir.yz / a.x;
+    }
+    if (a.y >= a.z) {
+      face = dir.y > 0.0 ? 2.0 : 3.0;
+      return dir.xz / a.y;
+    }
+    face = dir.z > 0.0 ? 4.0 : 5.0;
+    return dir.xy / a.z;
+  }
+
+  vec3 cubeDir(vec2 uv, float face) {
+    if (face < 0.5) return normalize(vec3(1.0, uv));
+    if (face < 1.5) return normalize(vec3(-1.0, uv));
+    if (face < 2.5) return normalize(vec3(uv.x, 1.0, uv.y));
+    if (face < 3.5) return normalize(vec3(uv.x, -1.0, uv.y));
+    if (face < 4.5) return normalize(vec3(uv, 1.0));
+    return normalize(vec3(uv, -1.0));
+  }
+
+  // One layer of stars from a hash grid on the cube faces: at most one star
+  // per cell, each with its own place, brightness, colour and twinkle.
+  // \`scale\` sets how fine the grid is and so how many stars there are;
+  // \`threshold\` how many cells stay empty; \`size\` the angular radius of
+  // the brightest, in radians.
+  vec3 starLayer(vec3 dir, float scale, float threshold, float size, float t) {
+    float face;
+    vec2 uv = cubeFace(dir, face);
+    vec2 cell = uv * scale;
+    vec2 i = floor(cell);
+    vec3 key = vec3(i, face * 7.0 + 3.0);
+    float seed = hash(key);
+    // Cells shrink towards the cube's corners; thin the stars there to keep
+    // the sky even.
+    float shrink = pow(1.0 + dot(uv, uv), 1.5);
+    if (seed < 1.0 - (1.0 - threshold) / shrink) return vec3(0.0);
+    vec2 offset = vec2(hash(key + 1.3), hash(key + 2.7)) - 0.5;
+    vec3 starDir = cubeDir((i + 0.5 + offset * 0.5) / scale, face);
+    float ang = length(dir - starDir);
+    // Most stars are faint; a magnitude distribution, not a coin toss.
+    float mag = pow(hash(key + 7.7), 3.0);
+    float radius = size * (0.35 + 1.0 * mag);
+    float core = smoothstep(radius, radius * 0.3, ang);
+    float glow = exp(-(ang * ang) / (radius * radius * 2.0)) * mag * 0.5;
+    // A star's glow must die before the cell's edge, or the edge cuts it:
+    // fade it radially inside the star's own distance to that edge.
+    float edgeDistance = (0.5 - max(abs(offset.x), abs(offset.y)) * 0.5) / scale;
+    glow *= smoothstep(edgeDistance, edgeDistance * 0.45, ang);
+    float twinkle = 0.78 + 0.22 * sin(t * (1.1 + 2.2 * hash(key + 5.5)) + seed * 60.0);
+    return starColor(hash(key + 9.1)) * (core + glow) * (0.2 + 0.8 * mag) * twinkle;
+  }
+
   void main() {
     vec3 dir = normalize(vWorldPosition);
     float height = clamp(dir.y, 0.0, 1.0);
@@ -125,37 +241,91 @@ const SKY_FRAGMENT_SHADER = /* glsl */ `
     // the zenith, so a low view still sees the sky's own colour.
     vec3 color = mix(horizonColor, topColor, smoothstep(0.0, 0.45, height));
 
-    // Stars: a scatter of points, most cells empty, fading out near the horizon.
-    if (starStrength > 0.001 && dir.y > 0.0) {
-      vec3 cell = dir * 190.0;
-      vec3 i = floor(cell);
-      vec3 f = fract(cell) - 0.5;
-      float seed = hash(i);
-      float present = step(0.978, seed);
-      vec3 offset = vec3(hash(i + 1.3), hash(i + 2.7), hash(i + 4.1)) - 0.5;
-      float d = length(f - offset * 0.6);
-      float twinkle = 0.7 + 0.3 * sin(time * 1.7 + seed * 40.0);
-      float star = present * smoothstep(0.11, 0.0, d) * twinkle;
-      color += vec3(0.9, 0.93, 1.0) * star * starStrength * smoothstep(0.03, 0.25, dir.y);
+    // The night sky (DESIGN.md §20): a Milky Way with structure, thousands of
+    // faint stars, hundreds of middling ones and a few dozen that blaze.
+    if (starStrength > 0.001 && dir.y > -0.02) {
+      float horizonFade = smoothstep(-0.02, 0.18, dir.y);
 
-      // The Milky Way: a soft, patchy band along one great circle.
-      // The band arches over the sea: from the east horizon up through the
-      // northern sky and down to the west.
+      // The Milky Way's frame: a great circle that arches over the sea, from
+      // the east horizon up through the northern sky and down to the west,
+      // with its bright core over the water.
       vec3 bandNormal = normalize(vec3(0.15, -0.7, -0.7));
-      float band = smoothstep(0.22, 0.0, abs(dot(dir, bandNormal)));
-      float patches = fbm(vec2(dot(dir, vec3(3.0, 0.0, 1.0)) * 3.0, dot(dir, vec3(0.0, 3.0, 1.0)) * 3.0));
-      float milky = band * (0.25 + 0.75 * patches) * 0.18;
-      color += vec3(0.78, 0.82, 0.95) * milky * starStrength * smoothstep(0.05, 0.3, dir.y);
+      vec3 bandU = normalize(cross(bandNormal, vec3(0.0, 1.0, 0.0)));
+      vec3 bandV = cross(bandNormal, bandU);
+      float across = dot(dir, bandNormal);
+      float along = atan(dot(dir, bandV), dot(dir, bandU));
+      vec3 coreDir = normalize(vec3(0.1, 0.75, -0.65));
+      float coreAlong = atan(dot(coreDir, bandV), dot(coreDir, bandU));
+      float coreness = 0.5 + 0.5 * cos(along - coreAlong);
+
+      // The band: a bright core that widens, ragged edges, wisps of structure
+      // and a dark dust lane that splits it, wandering as it goes.
+      float ragged = 0.65 + 0.7 * fbm(vec2(along * 2.5, 11.0));
+      float width = (0.05 + 0.09 * coreness) * ragged;
+      float profile = exp(-(across * across) / (width * width));
+      // Clumps and rifts rather than streaks: the noise is warped by itself
+      // so nothing lines up with the band.
+      vec2 bandCoord = vec2(along * 9.0, across * 7.0);
+      vec2 warp = vec2(fbm(bandCoord + 2.0), fbm(bandCoord + 5.0)) - 0.5;
+      float structure = fbm(bandCoord + warp * 1.5);
+      float wisps = fbm(bandCoord * 2.6 + warp * 2.0 + 7.0);
+      float laneCentre = 0.015 * sin(along * 2.0 + 0.8) + 0.01 * sin(along * 5.0);
+      float laneWidth = 0.018 + 0.014 * coreness;
+      float lane = exp(-pow((across - laneCentre) / laneWidth, 2.0))
+        * (0.5 + 0.5 * coreness)
+        * (0.55 + 0.45 * fbm(vec2(along * 4.0, 3.0)));
+      float glow = profile * pow(0.25 + 0.75 * structure, 2.2) * (0.5 + 0.8 * wisps) * (0.25 + 0.75 * coreness);
+      glow *= 1.0 - 0.85 * lane;
+      vec3 milkyColor = mix(vec3(0.6, 0.7, 1.0), vec3(1.0, 0.88, 0.7), coreness * 0.85);
+      color += milkyColor * glow * 0.7 * starStrength * horizonFade;
+
+      // Stars: the faint dust of the sky, denser inside the band; the
+      // middling stars; and the leading few with a bloom and a spike.
+      vec3 stars = vec3(0.0);
+      stars += starLayer(dir, 230.0, 0.72 - 0.4 * profile, 0.0007, time) * 0.7;
+      stars += starLayer(dir, 70.0, 0.84, 0.0018, time);
+      color += stars * starStrength * horizonFade;
+
+      for (int k = 0; k < BRIGHT_STAR_COUNT; k++) {
+        vec3 s = brightStars[k].xyz;
+        float mag = brightStars[k].w;
+        float ang = length(dir - s);
+        if (ang > 0.08) continue;
+        float radius = 0.0022 + 0.003 * mag;
+        float core = smoothstep(radius, radius * 0.3, ang);
+        float bloom = exp(-ang * ang / (radius * radius * 7.0)) * 0.6;
+        vec3 tangent = normalize(cross(s, abs(s.y) < 0.9 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0)));
+        vec3 bitangent = cross(s, tangent);
+        vec3 delta = dir - s;
+        float sx = dot(delta, tangent);
+        float sy = dot(delta, bitangent);
+        float spike = exp(-abs(sx) * 80.0) * exp(-abs(sy) * 1500.0)
+          + exp(-abs(sy) * 80.0) * exp(-abs(sx) * 1500.0);
+        float twinkle = 0.86 + 0.14 * sin(time * 2.0 + float(k) * 1.7);
+        float light = (core * 1.6 + bloom + spike * 0.7 * mag * mag) * (0.5 + 0.7 * mag);
+        color += brightColors[k] * light * starStrength * twinkle * horizonFade;
+      }
     }
 
-    // The moon: a disc, a shaded edge for the phase, and a halo.
+    // The moon: a crescent with maria, lit from the side, with a soft halo
+    // that stays well below the stars.
     if (moonStrength > 0.001) {
-      float moonDisc = disc(dir, moonDirection, 0.99955, 0.00025);
-      vec3 shadowSide = normalize(moonDirection + vec3(0.024, 0.012, 0.0));
-      float shade = disc(dir, shadowSide, 0.99955, 0.00035);
-      float lit = moonDisc * (1.0 - shade * 0.75);
-      float halo = pow(max(dot(dir, moonDirection), 0.0), 900.0) * 0.28;
-      color += vec3(0.92, 0.93, 0.88) * lit * moonStrength * 1.6;
+      float mc = dot(dir, moonDirection);
+      float moonDisc = disc(dir, moonDirection, 0.99955, 0.00004);
+      vec3 moonT = normalize(cross(moonDirection, vec3(0.0, 1.0, 0.0)));
+      vec3 moonB = cross(moonDirection, moonT);
+      vec3 md = dir - moonDirection;
+      vec2 mp = vec2(dot(md, moonT), dot(md, moonB)) / 0.03;
+      float r2 = dot(mp, mp);
+      vec3 sphereNormal = vec3(mp, sqrt(max(0.0, 1.0 - r2)));
+      vec3 phaseLight = normalize(vec3(0.8, 0.2, 0.22));
+      float lambert = dot(sphereNormal, phaseLight);
+      float maria = 0.72 + 0.28 * smoothstep(0.4, 0.62, fbm(mp * 3.2 + 3.0) * 0.7 + fbm(mp * 7.0 + 9.0) * 0.3);
+      float limb = 0.8 + 0.2 * sphereNormal.z;
+      float lit = 0.05 + 0.95 * smoothstep(-0.08, 0.4, lambert);
+      vec3 moonFace = vec3(0.93, 0.92, 0.86) * maria * limb * lit;
+      color += moonFace * moonDisc * moonStrength * 1.5;
+      float halo = pow(max(mc, 0.0), 700.0) * 0.16 + pow(max(mc, 0.0), 140.0) * 0.04;
       color += vec3(0.75, 0.8, 0.95) * halo * moonStrength;
     }
 
@@ -172,7 +342,8 @@ const SKY_FRAGMENT_SHADER = /* glsl */ `
       vec2 sheet = dir.xz / (dir.y + 0.12) * 0.9 + vec2(time * 0.004, time * 0.0015);
       float n = fbm(sheet);
       float edge = 0.54 - cloudCover * 0.12;
-      float cover = smoothstep(edge, edge + 0.14, n);
+      // Nights are clear: the stars are the subject then (DESIGN.md §20).
+      float cover = smoothstep(edge, edge + 0.14, n) * (1.0 - 0.85 * starStrength);
       float towardSun = 0.5 + 0.5 * dot(dir, sunDirection);
       float lightness = smoothstep(edge, edge + 0.3, n) * 0.6 + towardSun * 0.25;
       vec3 cloud = mix(cloudShade, cloudLit, lightness);
@@ -241,6 +412,7 @@ export class Environment {
   };
 
   constructor(scene: Scene) {
+    const stars = brightStars();
     this.skyMaterial = new ShaderMaterial({
       uniforms: {
         topColor: { value: new Color(0x4b8ed2) },
@@ -255,9 +427,12 @@ export class Environment {
         cloudShade: { value: new Color(0xc2cfdd) },
         cloudCover: { value: 0.45 },
         time: { value: 0 },
+        brightStars: { value: stars.directions },
+        brightColors: { value: stars.colors },
       },
       vertexShader: SKY_VERTEX_SHADER,
       fragmentShader: SKY_FRAGMENT_SHADER,
+      defines: { BRIGHT_STAR_COUNT },
       side: BackSide,
       depthWrite: false,
       fog: false,

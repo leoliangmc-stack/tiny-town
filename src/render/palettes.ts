@@ -59,8 +59,8 @@ export const TIME_PALETTES: readonly TimePalette[] = [
   {
     minuteOfDay: 0,
     name: 'night',
-    skyTop: 0x121a36,
-    skyHorizon: 0x2a3757,
+    skyTop: 0x080d1f,
+    skyHorizon: 0x1b2540,
     ambientSky: 0x55679a,
     ambientGround: 0x232a3e,
     ambientIntensity: 0.78,
@@ -81,8 +81,8 @@ export const TIME_PALETTES: readonly TimePalette[] = [
   {
     minuteOfDay: 4 * 60 + 40,
     name: 'late night',
-    skyTop: 0x141d3a,
-    skyHorizon: 0x2f3d5f,
+    skyTop: 0x0a1024,
+    skyHorizon: 0x1e2946,
     ambientSky: 0x58699c,
     ambientGround: 0x252c41,
     ambientIntensity: 0.8,
@@ -213,7 +213,7 @@ export const TIME_PALETTES: readonly TimePalette[] = [
   {
     minuteOfDay: 20 * 60 + 45,
     name: 'nightfall',
-    skyTop: 0x1a2448,
+    skyTop: 0x101a3a,
     skyHorizon: 0x445377,
     ambientSky: 0x7484b0,
     ambientGround: 0x2b3247,

@@ -2,6 +2,24 @@
 
 ## Phase 4.6 — Environment and sky
 
+Revised after the author saw the first night: the night sky is now a hero (decision 27).
+
+- The sky shader draws a Tekapo night. Three tiers of stars: a few dozen leading stars
+  placed once with the seeded generator and handed in as uniforms, each with a bloom and a
+  four-point spike; hundreds of middling stars and a dust of thousands of faint ones from
+  hash grids laid on the faces of a cube, so every patch of sky is even and no cell shows
+  its edge. Every star has a magnitude drawn from a steep distribution and a colour from a
+  table of real star temperatures: blue-white, white, yellow-white, yellow-orange,
+  orange-red. The Milky Way is a broad bright band with a dense warm core over the sea,
+  ragged edges, clumps and rifts from warped noise, and a dark dust lane that splits it.
+  The moon is a crescent with a soft terminator, maria, limb darkening and faint
+  earthshine, under a halo kept well below the stars; nights are clear of cloud.
+- Night palette stops go darker at the top of the sky so the stars have a floor; window
+  lights, street lamps and car lights are untouched and stay the brightest things in the
+  frame.
+- All of it stays in the one sky draw call: draw calls 221, p95 frame time 18.1 ms in the
+  night god view and 18.9 ms with the sky filling the frame.
+
 - `render/Scenery.ts`: the place around the town. A sea to the north behind a curved
   beach (`coastZ`), drawn as one shader plane: a deep colour that shallows towards the
   sand, a faint slow swell, a foam line along the shore, and a band of glint stretched
