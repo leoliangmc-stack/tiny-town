@@ -1,5 +1,22 @@
 # Changelog
 
+## Fix — pavements that stop at the junction
+
+The author circled stubs of pavement standing in the road at every junction.
+
+- Cause: each pavement was one box the length of its street plus a pavement's width at
+  either end, laid straight through every junction. A cross street's pavements therefore
+  overshot its own tarmac by 2.6 m into the lane it met, over the zebra crossing, and
+  the lanes' and the high street's pavements ran unbroken across every cross street. The
+  flat junction slab was meant to hide this, but the kerbs are raised and stood proud of
+  it. The tan pavements of earlier phases made it hard to see; the pale stone made it
+  plain.
+- Fix: a pavement is now drawn as segments that stop at the tarmac of every crossing
+  street that continues on its side, carry on past the ones that end there, and wrap the
+  corner at the street's own ends. The corner squares of a junction where both streets
+  carry on are filled in on their own. Nothing is drawn twice, so nothing z-fights, and
+  the kerb line follows each segment.
+
 ## Fix — paving that reads as paving
 
 The author asked why there were dirt tracks along the roads. There were none: the

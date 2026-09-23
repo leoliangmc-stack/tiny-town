@@ -429,51 +429,14 @@ export class TownView {
         COLOR.road,
       );
 
-      const kerbWidth = SIDEWALK_EDGE - ROAD_WIDTH / 2;
-      for (const side of [-1, 1] as const) {
-        const offset = side * (ROAD_WIDTH / 2 + kerbWidth / 2);
-        const kerbX = alongX ? middle : street.at + offset;
-        const kerbZ = alongX ? street.at + offset : middle;
-        this.batch('stoneBox').place(
-          {
-            x: kerbX,
-            y: groundHeight(kerbX, kerbZ) + PAVEMENT_HEIGHT / 2,
-            z: kerbZ,
-          },
-          { x: groundTiltX(kerbX, kerbZ) },
-          {
-            x: alongX ? length + kerbWidth * 2 : kerbWidth,
-            y: PAVEMENT_HEIGHT,
-            z: alongX ? kerbWidth : length + kerbWidth * 2,
-          },
-          // The material carries the stone; tinting the instance too would
-          // square the colour and turn the pavement the colour of the earth.
-          0xffffff,
-        );
-        // A painted kerb where the pavement meets the ground.
-        const edge = side * (SIDEWALK_EDGE - KERB_LINE / 2);
-        const lineX = alongX ? middle : street.at + edge;
-        const lineZ = alongX ? street.at + edge : middle;
-        this.batch('box').place(
-          {
-            x: lineX,
-            y: groundHeight(lineX, lineZ) + PAVEMENT_HEIGHT + 0.015,
-            z: lineZ,
-          },
-          { x: groundTiltX(lineX, lineZ) },
-          {
-            x: alongX ? length + kerbWidth * 2 : KERB_LINE,
-            y: 0.03,
-            z: alongX ? KERB_LINE : length + kerbWidth * 2,
-          },
-          COLOR.kerb,
-        );
-      }
+      this.addPavements(street);
 
       this.addCentreLine(street);
     }
 
-    // The junctions are plain tarmac, which also covers the kerb corners.
+    this.addJunctionCorners();
+
+    // The junctions are plain tarmac between the corner squares.
     for (const junction of junctions()) {
       this.slab(
         junction.x,
@@ -486,6 +449,98 @@ export class TownView {
     }
 
     this.addZebraCrossings();
+  }
+
+  /**
+   * The pavements of one street, as raised stone kerbs. A pavement stops at
+   * the tarmac of every crossing street that continues on its side, and
+   * carries on past the ones that end there; at the street's own ends it
+   * wraps the corner. The corners of a junction where both streets carry on
+   * get their own square. Nothing is drawn twice, so nothing z-fights.
+   */
+  private addPavements(street: Street): void {
+    const alongX = street.axis === 'x';
+    const kerbWidth = SIDEWALK_EDGE - ROAD_WIDTH / 2;
+    const half = ROAD_WIDTH / 2;
+    const crossings = junctions()
+      .filter((junction) => (alongX ? junction.z : junction.x) === street.at)
+      .map((junction) => (alongX ? junction.x : junction.z))
+      .sort((a, b) => a - b);
+
+    for (const side of [-1, 1] as const) {
+      const offset = side * (half + kerbWidth / 2);
+      // Where a crossing street's tarmac cuts this pavement.
+      const cuts = crossings.filter((along) => {
+        const junction = alongX ? { x: along, z: street.at } : { x: street.at, z: along };
+        return alongX
+          ? this.streetContinues(junction, 0, side)
+          : this.streetContinues(junction, side, 0);
+      });
+      // The ends: past the last junction on this side, if it is not a cut,
+      // the pavement runs on to wrap the corner.
+      const startAt = cuts.includes(street.from) ? street.from + half : street.from - SIDEWALK_EDGE;
+      const endAt = cuts.includes(street.to) ? street.to - half : street.to + SIDEWALK_EDGE;
+      const stops = [startAt, ...cuts.flatMap((cut) => [cut - half, cut + half]), endAt];
+
+      for (let index = 0; index < stops.length; index += 2) {
+        const a = stops[index];
+        const b = stops[index + 1];
+        if (b - a < 0.05) {
+          continue;
+        }
+        const middle = (a + b) / 2;
+        const length = b - a;
+        const x = alongX ? middle : street.at + offset;
+        const z = alongX ? street.at + offset : middle;
+        this.batch('stoneBox').place(
+          { x, y: groundHeight(x, z) + PAVEMENT_HEIGHT / 2, z },
+          { x: groundTiltX(x, z) },
+          { x: alongX ? length : kerbWidth, y: PAVEMENT_HEIGHT, z: alongX ? kerbWidth : length },
+          0xffffff,
+        );
+        this.kerbLine(alongX, middle, length, street.at + side * (SIDEWALK_EDGE - KERB_LINE / 2));
+      }
+    }
+  }
+
+  /** A painted kerb line, `length` long, along a street's axis at `across`. */
+  private kerbLine(alongX: boolean, middle: number, length: number, across: number): void {
+    const x = alongX ? middle : across;
+    const z = alongX ? across : middle;
+    this.batch('box').place(
+      { x, y: groundHeight(x, z) + PAVEMENT_HEIGHT + 0.015, z },
+      { x: groundTiltX(x, z) },
+      { x: alongX ? length : KERB_LINE, y: 0.03, z: alongX ? KERB_LINE : length },
+      COLOR.kerb,
+    );
+  }
+
+  /**
+   * The corner squares of every junction where both streets carry on: the
+   * pavements are cut there, so the square between them is filled in.
+   */
+  private addJunctionCorners(): void {
+    const half = ROAD_WIDTH / 2;
+    const kerbWidth = SIDEWALK_EDGE - half;
+    for (const junction of junctions()) {
+      for (const sx of [-1, 1] as const) {
+        for (const sz of [-1, 1] as const) {
+          if (!this.streetContinues(junction, sx, 0) || !this.streetContinues(junction, 0, sz)) {
+            continue;
+          }
+          const x = junction.x + sx * (half + kerbWidth / 2);
+          const z = junction.z + sz * (half + kerbWidth / 2);
+          this.batch('stoneBox').place(
+            { x, y: groundHeight(x, z) + PAVEMENT_HEIGHT / 2, z },
+            { x: groundTiltX(x, z) },
+            { x: kerbWidth, y: PAVEMENT_HEIGHT, z: kerbWidth },
+            0xffffff,
+          );
+          this.kerbLine(true, x, kerbWidth, junction.z + sz * (SIDEWALK_EDGE - KERB_LINE / 2));
+          this.kerbLine(false, z, kerbWidth, junction.x + sx * (SIDEWALK_EDGE - KERB_LINE / 2));
+        }
+      }
+    }
   }
 
   private addCentreLine(street: Street): void {
