@@ -20,6 +20,7 @@ import {
 } from 'three';
 
 import { Rng } from '../simulation/Rng.js';
+import { groundHeight } from '../world/Terrain.js';
 import { townBounds } from '../world/Town.js';
 
 import type { EnvironmentState } from './Environment.js';
@@ -115,7 +116,7 @@ const SEA_FRAGMENT_SHADER = /* glsl */ `
     // Fine sparkle close by; a smooth path further out, where pixels are
     // too coarse to carry it.
     float fine = 0.5 + 0.5 * sin(p.x * 1.3 + p.y * 0.9 + time * 2.2) * sin(p.x * 0.4 - p.y * 1.7 - time * 1.5 + wave * 3.0);
-    float sparkle = mix(0.4 + 0.15 * wave, fine, near);
+    float sparkle = mix(0.4 + 0.15 * wave, fine, near * 0.6);
     float lowLight = 1.0 - smoothstep(0.35, 0.9, lightDirection.y);
     color += glintColor * band * sparkle * glintStrength * (0.3 + 0.5 * lowLight);
 
@@ -197,8 +198,18 @@ export class Scenery {
       beach.lineTo(x, coastZ(x) + BEACH_DEPTH + 2.5 * Math.sin(x / 17));
     }
     beach.closePath();
+    const beachGeometry = new ShapeGeometry(beach, 1);
+    // The sand climbs onto the slope where the shore comes close to the town.
+    const sandPositions = beachGeometry.getAttribute('position');
+    for (let index = 0; index < sandPositions.count; index += 1) {
+      // Shape space: x is world x, y is world z before the mesh is laid flat
+      // and flipped, so the height is read at (x, y) and written to z.
+      sandPositions.setZ(index, groundHeight(sandPositions.getX(index), sandPositions.getY(index)));
+    }
+    sandPositions.needsUpdate = true;
+    beachGeometry.computeVertexNormals();
     const beachMesh = new Mesh(
-      new ShapeGeometry(beach, 1),
+      beachGeometry,
       new MeshStandardMaterial({ color: SAND, roughness: 1, metalness: 0, side: DoubleSide }),
     );
     beachMesh.rotation.x = -Math.PI / 2;
@@ -270,19 +281,23 @@ export class Scenery {
       const topB = base(b.angle, b.radius);
       const backA = base(a.angle, outerRadius * 1.3);
       const backB = base(b.angle, outerRadius * 1.3);
+      // The ridge stands on the ground, which is higher inland.
+      const floor = (point: { x: number; z: number }): number => groundHeight(point.x, point.z) - 1;
+      const peakA = floor(topA) + a.height;
+      const peakB = floor(topB) + b.height;
       // Front slope and back slope, two triangles each.
-      push(frontA.x, -1, frontA.z);
-      push(frontB.x, -1, frontB.z);
-      push(topB.x, b.height, topB.z);
-      push(frontA.x, -1, frontA.z);
-      push(topB.x, b.height, topB.z);
-      push(topA.x, a.height, topA.z);
-      push(topA.x, a.height, topA.z);
-      push(topB.x, b.height, topB.z);
-      push(backB.x, -1, backB.z);
-      push(topA.x, a.height, topA.z);
-      push(backB.x, -1, backB.z);
-      push(backA.x, -1, backA.z);
+      push(frontA.x, floor(frontA), frontA.z);
+      push(frontB.x, floor(frontB), frontB.z);
+      push(topB.x, peakB, topB.z);
+      push(frontA.x, floor(frontA), frontA.z);
+      push(topB.x, peakB, topB.z);
+      push(topA.x, peakA, topA.z);
+      push(topA.x, peakA, topA.z);
+      push(topB.x, peakB, topB.z);
+      push(backB.x, floor(backB), backB.z);
+      push(topA.x, peakA, topA.z);
+      push(backB.x, floor(backB), backB.z);
+      push(backA.x, floor(backA), backA.z);
     }
 
     const geometry = new BufferGeometry();
@@ -359,7 +374,8 @@ export class Scenery {
 
     trees.forEach((tree, index) => {
       const trunkHeight = tree.height * 0.35;
-      placement.position.set(tree.x, trunkHeight / 2, tree.z);
+      const ground = groundHeight(tree.x, tree.z);
+      placement.position.set(tree.x, ground + trunkHeight / 2, tree.z);
       placement.rotation.set(0, 0, 0);
       placement.scale.set(1, trunkHeight, 1);
       placement.updateMatrix();
@@ -368,13 +384,13 @@ export class Scenery {
       const crownHeight = tree.height - trunkHeight;
       placement.rotation.set(0, rng.nextFloat(0, Math.PI * 2), 0);
       if (tree.pine) {
-        placement.position.set(tree.x, trunkHeight + crownHeight / 2, tree.z);
+        placement.position.set(tree.x, ground + trunkHeight + crownHeight / 2, tree.z);
         placement.scale.set(crownHeight * 0.32, crownHeight, crownHeight * 0.32);
         placement.updateMatrix();
         pines.setMatrixAt(index, placement.matrix);
         crowns.setMatrixAt(index, hidden.matrix);
       } else {
-        placement.position.set(tree.x, trunkHeight + crownHeight * 0.45, tree.z);
+        placement.position.set(tree.x, ground + trunkHeight + crownHeight * 0.45, tree.z);
         placement.scale.set(crownHeight * 0.55, crownHeight * 0.5, crownHeight * 0.55);
         placement.updateMatrix();
         crowns.setMatrixAt(index, placement.matrix);

@@ -15,6 +15,7 @@ import { DEFAULT_SPEED, type SpeedLevel } from '../simulation/constants.js';
 import { TickScheduler } from '../simulation/TickScheduler.js';
 import { World } from '../simulation/World.js';
 
+import { TOWN_RISE } from '../world/Terrain.js';
 import { townBounds } from '../world/Town.js';
 
 import { CitizenView } from './CitizenView.js';
@@ -55,7 +56,7 @@ const PORTRAIT_VIEW = {
   lift: 0.12,
 };
 
-const CAMERA_TARGET = new Vector3(0, 2, 0);
+const CAMERA_TARGET = new Vector3(0, 6, 0);
 
 /**
  * The night tilt (SPEC.md 2.9, decision 28): after dark the default camera
@@ -81,8 +82,8 @@ function nightAmount(minuteOfDay: number): number {
   return minuteOfDay < SUNRISE_MINUTE + TILT_MINUTES ? 1 - dawn : dusk;
 }
 
-/** Tallest thing in the town, for the camera to frame over. */
-const TOWN_HEIGHT = 13;
+/** Tallest thing in the town, on the highest ground, for the camera to frame over. */
+const TOWN_HEIGHT = 13 + TOWN_RISE;
 
 /** `?debug` draws the navigation graphs and the routes over the town. */
 function debugRequested(): boolean {
@@ -169,7 +170,7 @@ export class App {
     // Draw the town in its opening light before the first frame runs.
     this.environment.update(world.time.minuteOfDay, 0);
     this.scenery.update(this.environment.state, 0, this.camera.position);
-    this.townView.update(world, this.environment.state, 10, this.camera);
+    this.townView.update(world, this.environment.state, 10, 0, this.camera);
     this.citizenView.update(10);
     this.vehicleView.update(this.environment.state, 10, this.camera);
 
@@ -357,7 +358,13 @@ export class App {
     // simulation never sees it (SPEC.md 2.14).
     this.environment.update(this.world.time.minuteOfDay, this.clock.elapsedTime);
     this.scenery.update(this.environment.state, this.clock.elapsedTime, this.camera.position);
-    this.townView.update(this.world, this.environment.state, deltaSeconds, this.camera);
+    this.townView.update(
+      this.world,
+      this.environment.state,
+      deltaSeconds,
+      this.clock.elapsedTime,
+      this.camera,
+    );
     this.citizenView.update(deltaSeconds);
     this.vehicleView.update(this.environment.state, deltaSeconds, this.camera);
 

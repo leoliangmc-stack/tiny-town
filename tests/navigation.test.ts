@@ -178,12 +178,12 @@ describe('the layout', () => {
         const style = house.style;
         expect(style, `${house.id} has no style`).toBeDefined();
         return [
-          style?.roofKind,
-          style?.roofColor,
+          style?.upper,
+          style?.dome,
           style?.wallColor,
-          style?.porch,
-          style?.balcony,
-          style?.fence,
+          style?.trimColor,
+          style?.stair,
+          style?.roofProp,
           style?.prop,
         ].join('|');
       }),

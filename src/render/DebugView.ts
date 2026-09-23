@@ -10,6 +10,7 @@ import {
 import type { Point } from '../entities/geometry.js';
 import type { NavGraph } from '../simulation/Navigation.js';
 import type { World } from '../simulation/World.js';
+import { groundHeight } from '../world/Terrain.js';
 
 /** Height the overlay floats at, so it reads clearly above the town. */
 const OVERLAY_HEIGHT = 1.4;
@@ -81,5 +82,5 @@ function graphLines(graph: NavGraph, color: ColorRepresentation, height: number)
 }
 
 function toVector(point: Point, height: number): Vector3 {
-  return new Vector3(point.x, height, point.z);
+  return new Vector3(point.x, groundHeight(point.x, point.z) + height, point.z);
 }

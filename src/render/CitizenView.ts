@@ -16,6 +16,7 @@ import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeom
 import type { Citizen } from '../entities/Citizen.js';
 import { isOutside, isWalking } from '../entities/Citizen.js';
 import type { World } from '../simulation/World.js';
+import { groundHeight } from '../world/Terrain.js';
 
 /**
  * Body proportions, in metres, for a citizen of height 1. A little small in
@@ -191,7 +192,7 @@ export class CitizenView {
 
     const base = new Matrix4()
       .makeRotationY(drawn.heading)
-      .setPosition(drawn.x, bob * scale, drawn.z)
+      .setPosition(drawn.x, groundHeight(drawn.x, drawn.z) + bob * scale, drawn.z)
       .multiply(new Matrix4().makeScale(scale, scale, scale));
 
     const place = (part: Part, x: number, y: number, z: number, rotX = 0, rotY = 0): void => {
@@ -238,7 +239,8 @@ export class CitizenView {
       return undefined;
     }
     const anchor = new Object3D();
-    anchor.position.set(this.drawn[index].x, 0, this.drawn[index].z);
+    const { x, z } = this.drawn[index];
+    anchor.position.set(x, groundHeight(x, z), z);
     return anchor;
   }
 }

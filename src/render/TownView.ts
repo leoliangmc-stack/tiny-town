@@ -8,7 +8,6 @@ import {
   CylinderGeometry,
   DataTexture,
   DoubleSide,
-  ExtrudeGeometry,
   Group,
   IcosahedronGeometry,
   type InstancedMesh,
@@ -21,21 +20,24 @@ import {
   Quaternion,
   RepeatWrapping,
   RGBAFormat,
-  Shape,
   SphereGeometry,
   SRGBColorSpace,
   TorusGeometry,
   Vector3,
 } from 'three';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 
 import type { Building, HouseStyle } from '../entities/Building.js';
 import { Rng } from '../simulation/Rng.js';
 import type { World } from '../simulation/World.js';
+import { groundHeight, groundTiltX } from '../world/Terrain.js';
 import {
   BUILDINGS,
+  CHURCH,
   FLOWER_BEDS,
   GROUND_SIZE,
+  LIGHTHOUSE,
   OUTDOOR_ZONES,
   PARKING_LOT,
   ROAD_WIDTH,
@@ -45,6 +47,7 @@ import {
   STREET_LAMP_HEIGHT,
   STREET_SIGNS,
   TREES,
+  WALL_WHITE,
   type OutdoorZone,
   type Street,
   junctions,
@@ -80,9 +83,38 @@ const COLOR = {
   wood: 0x8a6f52,
   glass: 0x9fb4c4,
   ivory: 0xf5f0e6,
-  awningCafe: 0xc9705f,
-  awningBakery: 0x6f9a7a,
+  /** The pale stone of plinths, steps and the lighthouse rock. */
+  stone: 0xd8d0c2,
+  /** Roof surfaces: a hair greyer than the walls, so a roof reads as a plane. */
+  roofWhite: 0xe9e6df,
+  dome: 0x2f4e9a,
+  equipment: 0x9a9a96,
 } as const;
+
+/**
+ * One theme colour per public building, run through its awning, door frame
+ * and sign (DESIGN.md §4): cafe ochre-red, bakery mustard, supermarket sea
+ * blue, school terracotta, office slate, apartments olive.
+ */
+const THEME_COLORS: Record<Exclude<Building['kind'], 'house'>, number> = {
+  cafe: 0xc9705f,
+  bakery: 0xd9a83e,
+  supermarket: 0x3f7fb8,
+  school: 0xc27a5a,
+  office: 0x5b7691,
+  apartment: 0x7e8a5a,
+};
+
+/** Cloths on the washing lines, and the potted plants. */
+const CLOTH_COLORS = [0xf5f0e6, 0x3f7fb8, 0xe6a15c, 0xc93a7a, 0xf1e2a3];
+
+/** How far the plinth reaches down into the slope, and how far it shows above it. */
+const PLINTH_DEPTH = 1.2;
+const PLINTH_LIP = 0.12;
+
+/** The lighthouse beam turns once in this many real seconds. */
+const BEAM_PERIOD_SECONDS = 6;
+const BEAM_LENGTH = 110;
 
 const ZONE_COLORS: Record<OutdoorZone['kind'], number> = {
   terrace: 0xd3c2a6,
@@ -98,9 +130,6 @@ const LAYER_ROAD = 0.02;
 const LAYER_ZONE = 0.05;
 const LAYER_MARKING = 0.08;
 const PAVEMENT_HEIGHT = 0.18;
-
-/** Corner radius of a building's walls: enough to read as soft, not as a pillow. */
-const ROUNDING = 0.3;
 
 /** Sideways offset of a glow quad from its window, and its size against the pane. */
 const GLOW_OFFSET = 0.4;
@@ -156,6 +185,10 @@ export class TownView {
   private readonly lastCameraQuaternion = new Quaternion(0, 0, 0, 0);
   private lampLit = 0;
 
+  /** The lighthouse beam: the one light in the night that moves. */
+  private readonly beam: Mesh;
+  private readonly beamMaterial: MeshBasicMaterial;
+
   constructor() {
     this.root.name = 'town';
 
@@ -190,6 +223,15 @@ export class TownView {
       opacity: 0,
     });
 
+    this.beamMaterial = new MeshBasicMaterial({
+      color: new Color(LAMP_EMISSIVE),
+      blending: AdditiveBlending,
+      transparent: true,
+      depthWrite: false,
+      opacity: 0,
+    });
+    this.beam = makeBeam(this.beamMaterial);
+
     this.defineBatches();
 
     this.addGround();
@@ -202,6 +244,8 @@ export class TownView {
     for (const building of BUILDINGS) {
       this.addBuilding(building);
     }
+    this.addChurch();
+    this.addLighthouse();
 
     this.addTrees();
     this.addStreetLamps();
@@ -230,6 +274,12 @@ export class TownView {
     // Plain shapes for trim and props, coloured per instance.
     define('box', new BoxGeometry(1, 1, 1), this.matteWhite);
     define('roundedBox', new RoundedBoxGeometry(1, 1, 1, 2, 0.08), this.matteWhite);
+    // Walls: a unit rounded box scaled to each volume, so every wall in town
+    // is one draw call. The small radius stays soft at wall size.
+    define('wallBox', new RoundedBoxGeometry(1, 1, 1, 3, 0.035), this.matteWhite);
+    define('dome', new SphereGeometry(1, 18, 10, 0, Math.PI * 2, 0, Math.PI / 2), this.matteWhite);
+    // The lamp room of the lighthouse and the lamp on the church dome.
+    define('lampCylinder', new CylinderGeometry(1, 1, 1, 12), this.lampMaterial, {});
     define('cylinder', new CylinderGeometry(1, 1, 1, 10), this.matteWhite);
     define('sphere', new SphereGeometry(1, 8, 6), this.matteWhite);
     define('cone', new ConeGeometry(1, 1, 12), this.matteWhite);
@@ -268,14 +318,27 @@ export class TownView {
     // fill, which is the surest sign of a machine-made scene (DESIGN.md §16).
     const material = matte(COLOR.grass);
     material.map = grassTexture();
-    const ground = new Mesh(new PlaneGeometry(GROUND_SIZE, GROUND_SIZE), material);
-    ground.rotation.x = -Math.PI / 2;
+    // A heightfield: the plane is laid flat, then every vertex is lifted to
+    // the ground height there (world/Terrain.ts), so the town sits on its slope.
+    const geometry = new PlaneGeometry(GROUND_SIZE, GROUND_SIZE, 200, 200);
+    geometry.applyMatrix4(new Matrix4().makeRotationX(-Math.PI / 2));
+    const positions = geometry.getAttribute('position');
+    for (let index = 0; index < positions.count; index += 1) {
+      positions.setY(index, groundHeight(positions.getX(index), positions.getZ(index)));
+    }
+    positions.needsUpdate = true;
+    geometry.computeVertexNormals();
+    const ground = new Mesh(geometry, material);
     ground.receiveShadow = true;
     ground.name = 'ground';
     this.root.add(ground);
   }
 
-  /** A flat rectangle on the ground: roads, patches, paths, painted lines. */
+  /**
+   * A flat rectangle on the ground: roads, patches, paths, painted lines.
+   * It is laid at the height of its centre and tilted to the grade, so it
+   * meets the slope along its whole length.
+   */
   private slab(
     centreX: number,
     centreZ: number,
@@ -284,7 +347,12 @@ export class TownView {
     y: number,
     color: number,
   ): void {
-    this.batch('slab').place({ x: centreX, y, z: centreZ }, {}, { x: sizeX, z: sizeZ }, color);
+    this.batch('slab').place(
+      { x: centreX, y: groundHeight(centreX, centreZ) + y, z: centreZ },
+      { x: groundTiltX(centreX, centreZ) },
+      { x: sizeX, z: sizeZ },
+      color,
+    );
   }
 
   /** Tarmac, raised kerbs and a dashed centre line for every street. */
@@ -306,13 +374,15 @@ export class TownView {
       const kerbWidth = SIDEWALK_EDGE - ROAD_WIDTH / 2;
       for (const side of [-1, 1] as const) {
         const offset = side * (ROAD_WIDTH / 2 + kerbWidth / 2);
+        const kerbX = alongX ? middle : street.at + offset;
+        const kerbZ = alongX ? street.at + offset : middle;
         this.batch('box').place(
           {
-            x: alongX ? middle : street.at + offset,
-            y: PAVEMENT_HEIGHT / 2,
-            z: alongX ? street.at + offset : middle,
+            x: kerbX,
+            y: groundHeight(kerbX, kerbZ) + PAVEMENT_HEIGHT / 2,
+            z: kerbZ,
           },
-          {},
+          { x: groundTiltX(kerbX, kerbZ) },
           {
             x: alongX ? length + kerbWidth * 2 : kerbWidth,
             y: PAVEMENT_HEIGHT,
@@ -441,15 +511,16 @@ export class TownView {
   private addTerraceFurniture(zone: OutdoorZone): void {
     const cylinder = this.batch('cylinder');
     for (const spawn of zone.spawnPoints) {
+      const ground = groundHeight(spawn.x, spawn.z);
       cylinder.place(
-        { x: spawn.x + 0.9, y: 0.36, z: spawn.z },
+        { x: spawn.x + 0.9, y: ground + 0.36, z: spawn.z },
         {},
         { x: 0.5, y: 0.72, z: 0.5 },
         COLOR.wood,
       );
       for (const side of [-0.75, 0.75]) {
         cylinder.place(
-          { x: spawn.x + 0.9, y: 0.21, z: spawn.z + side },
+          { x: spawn.x + 0.9, y: ground + 0.21, z: spawn.z + side },
           {},
           { x: 0.2, y: 0.42, z: 0.2 },
           COLOR.ironwork,
@@ -464,17 +535,18 @@ export class TownView {
     const blue = 0x5f8fb5;
     const centreX = (zone.minX + zone.maxX) / 2;
     const centreZ = (zone.minZ + zone.maxZ) / 2;
+    const ground = groundHeight(centreX, centreZ);
 
     for (const offset of [-2.2, 2.2]) {
       cylinder.place(
-        { x: centreX + offset, y: 1.2, z: centreZ },
+        { x: centreX + offset, y: ground + 1.2, z: centreZ },
         {},
         { x: 0.11, y: 2.4, z: 0.11 },
         blue,
       );
     }
     cylinder.place(
-      { x: centreX, y: 2.4, z: centreZ },
+      { x: centreX, y: ground + 2.4, z: centreZ },
       { z: Math.PI / 2 },
       { x: 0.11, y: 4.8, z: 0.11 },
       blue,
@@ -489,15 +561,16 @@ export class TownView {
     this.slab(centreX, centreZ, zone.maxX - zone.minX, 2.6, LAYER_ZONE, COLOR.parkPath);
 
     const rounded = this.batch('roundedBox');
+    const ground = groundHeight(centreX, centreZ - 2.5);
     for (const offset of [-7, 0, 7]) {
       rounded.place(
-        { x: centreX + offset, y: 0.45, z: centreZ - 2.4 },
+        { x: centreX + offset, y: ground + 0.45, z: centreZ - 2.4 },
         {},
         { x: 2.2, y: 0.2, z: 0.6 },
         COLOR.wood,
       );
       rounded.place(
-        { x: centreX + offset, y: 0.8, z: centreZ - 2.65 },
+        { x: centreX + offset, y: ground + 0.8, z: centreZ - 2.65 },
         {},
         { x: 2.2, y: 0.5, z: 0.12 },
         COLOR.wood,
@@ -537,7 +610,21 @@ export class TownView {
   private addFlowerBeds(): void {
     const rng = new Rng('flowers');
     for (const bed of FLOWER_BEDS) {
-      this.flowerBed(new Matrix4(), bed.minX, bed.maxX, bed.minZ, bed.maxZ, rng);
+      // The bed is placed through a frame on the slope at its centre.
+      const centreX = (bed.minX + bed.maxX) / 2;
+      const centreZ = (bed.minZ + bed.maxZ) / 2;
+      const frame = composeMatrix(
+        { x: centreX, y: groundHeight(centreX, centreZ), z: centreZ },
+        { x: groundTiltX(centreX, centreZ) },
+      );
+      this.flowerBed(
+        frame,
+        bed.minX - centreX,
+        bed.maxX - centreX,
+        bed.minZ - centreZ,
+        bed.maxZ - centreZ,
+        rng,
+      );
     }
   }
 
@@ -586,7 +673,11 @@ export class TownView {
     for (const shrub of SHRUBS) {
       const color = new Color(COLOR.foliage).offsetHSL(0, rng.nextFloat(-0.05, 0.05), -0.04);
       shrubs.place(
-        { x: shrub.position.x, y: shrub.radius * 0.55, z: shrub.position.z },
+        {
+          x: shrub.position.x,
+          y: groundHeight(shrub.position.x, shrub.position.z) + shrub.radius * 0.55,
+          z: shrub.position.z,
+        },
         {},
         { x: shrub.radius, y: shrub.radius * 0.72, z: shrub.radius },
         color,
@@ -595,29 +686,39 @@ export class TownView {
   }
 
   private addBuilding(building: Building): void {
-    // The walls and roof are meshes of their own; everything else on the
-    // building goes into the shared batches through this frame.
+    const ground = groundHeight(building.position.x, building.position.z);
     const frame = composeMatrix(
-      { x: building.position.x, y: 0, z: building.position.z },
+      { x: building.position.x, y: ground, z: building.position.z },
       { y: building.rotationY },
     );
+    const at: At = (position, scale, rotation = {}) =>
+      frame.clone().multiply(composeMatrix(position, rotation, scale));
+    const style = building.style;
+    const wall = jitter(style?.wallColor ?? WALL_WHITE, building.id);
+    const theme = style
+      ? style.trimColor
+      : THEME_COLORS[building.kind as keyof typeof THEME_COLORS];
+    const volumes = buildingVolumes(building);
 
-    const walls = new Mesh(
-      new RoundedBoxGeometry(building.width, building.wallHeight, building.depth, 3, ROUNDING),
-      matte(jitter(wallColor(building), building.id)),
+    // A plinth of pale stone takes up the slope, so the walls stay level.
+    this.batch('box').add(
+      at(
+        { x: 0, y: PLINTH_LIP - PLINTH_DEPTH / 2, z: 0 },
+        { x: building.width + 0.7, y: PLINTH_DEPTH, z: building.depth + 0.7 },
+      ),
+      COLOR.stone,
     );
-    walls.position.set(building.position.x, building.wallHeight / 2, building.position.z);
-    walls.rotation.y = building.rotationY;
-    walls.castShadow = true;
-    walls.receiveShadow = true;
-    walls.name = building.id;
-    this.root.add(walls);
 
-    const roof = roofFor(building);
-    roof.applyMatrix4(frame);
-    this.root.add(roof);
-
-    this.addRoofTrim(frame, building);
+    for (const volume of volumes) {
+      this.batch('wallBox').add(
+        at(
+          { x: volume.x, y: volume.base + volume.height / 2, z: volume.z },
+          { x: volume.width, y: volume.height, z: volume.depth },
+        ),
+        wall,
+      );
+      this.addRoofSurface(at, volume, wall, building.roofHeight);
+    }
 
     const lights: BuildingLights = {
       building,
@@ -626,308 +727,412 @@ export class TownView {
       lit: 0,
       written: -1,
     };
-    const trimColor = building.style?.trimColor ?? COLOR.ivory;
 
-    for (const placement of windowPlacements(building)) {
-      const rotation = { y: placement.rotationY };
-      const nx = placement.normalX;
-      const nz = placement.normalZ;
-
-      this.batch('windowFrame').add(
-        frame.clone().multiply(
-          composeMatrix({ x: placement.x, y: placement.y, z: placement.z }, rotation, {
-            x: placement.width + 0.24,
-            y: placement.height + 0.24,
-            z: 0.12,
-          }),
-        ),
-        trimColor,
-      );
-
-      // A sill below each window: a small ledge that catches light and shadow.
-      this.batch('windowSill').add(
-        frame.clone().multiply(
-          composeMatrix(
-            {
-              x: placement.x + nx * 0.1,
-              y: placement.y - placement.height / 2 - 0.12,
-              z: placement.z + nz * 0.1,
-            },
-            rotation,
-            { x: placement.width + 0.4, y: 0.1, z: 0.28 },
-          ),
-        ),
-        trimColor,
-      );
-
-      lights.paneIndices.push(
-        this.batch('windowPane').add(
-          frame
-            .clone()
-            .multiply(
-              composeMatrix(
-                { x: placement.x + nx * 0.07, y: placement.y, z: placement.z + nz * 0.07 },
-                rotation,
-                { x: placement.width, y: placement.height, z: 1 },
-              ),
-            ),
-          new Color(0, 0, 0),
-        ),
-      );
-
-      const glowPosition = new Vector3(
-        placement.x + nx * GLOW_OFFSET,
-        placement.y,
-        placement.z + nz * GLOW_OFFSET,
-      ).applyMatrix4(frame);
-      const glowScale = Math.max(placement.width, 1.1) * GLOW_SCALE;
-      lights.glowIndices.push(
-        this.batch('windowGlow').add(
-          composeMatrix(glowPosition, {}, glowScale),
-          new Color(0, 0, 0),
-        ),
-      );
-      this.windowGlowBillboards.push({ position: glowPosition, scale: glowScale });
+    for (const placement of windowPlacements(building, volumes)) {
+      this.addWindow(frame, at, placement, theme, style !== undefined, lights);
     }
 
-    this.addDoorAndTrim(frame, building);
-    if (building.style) {
-      this.addYard(frame, building, building.style);
+    this.addDoorAndFront(at, building, volumes[0], theme);
+    if (style) {
+      this.addHouseRoof(at, building, style, volumes);
+      this.addYard(frame, at, building, style, volumes[0]);
+    } else {
+      this.addShopRoof(at, building, volumes[0]);
     }
 
     this.buildingLights.push(lights);
   }
 
-  /**
-   * What sits on and under a roof: a fascia board along the eaves, a ridge
-   * cap on a pitched roof, and a chimney on every other house. Small parts,
-   * but they are what make a roof look assembled rather than extruded.
-   */
-  private addRoofTrim(frame: Matrix4, building: Building): void {
-    const style = building.style;
-    const trimColor = style?.trimColor ?? COLOR.ivory;
-    const pitched =
-      style?.roofKind === 'gable' || style?.roofKind === 'hip' || building.kind === 'bakery';
-
-    if (pitched) {
-      this.batch('box').add(
-        frame
-          .clone()
-          .multiply(
-            composeMatrix(
-              { x: 0, y: building.wallHeight - 0.04, z: 0 },
-              {},
-              { x: building.width + 1.1, y: 0.22, z: building.depth + 1.1 },
-            ),
-          ),
-        trimColor,
+  /** The roof of one volume: a surface a hair greyer than the walls, and a parapet. */
+  private addRoofSurface(at: At, volume: Volume, wall: number, parapet: number): void {
+    const top = volume.base + volume.height;
+    this.batch('box').add(
+      at(
+        { x: volume.x, y: top + 0.03, z: volume.z },
+        { x: volume.width - 0.4, y: 0.06, z: volume.depth - 0.4 },
+      ),
+      COLOR.roofWhite,
+    );
+    const thickness = 0.28;
+    const box = this.batch('box');
+    for (const side of [-1, 1]) {
+      box.add(
+        at(
+          {
+            x: volume.x + side * (volume.width / 2 - thickness / 2),
+            y: top + parapet / 2,
+            z: volume.z,
+          },
+          { x: thickness, y: parapet, z: volume.depth },
+        ),
+        wall,
       );
-    }
-
-    if (style?.roofKind === 'gable') {
-      this.batch('roundedBox').add(
-        frame
-          .clone()
-          .multiply(
-            composeMatrix(
-              { x: 0, y: building.wallHeight + building.roofHeight - 0.02, z: 0 },
-              {},
-              { x: 0.34, y: 0.22, z: building.depth + 1.2 },
-            ),
-          ),
-        darken(style.roofColor, 0.82),
-      );
-    }
-
-    const houseNumber = Number(building.id.slice(-2));
-    if (building.kind === 'house' && pitched && houseNumber % 2 === 0) {
-      // Off centre and towards the back, so it clears the ridge.
-      const chimney = {
-        x: building.width * 0.28,
-        y: building.wallHeight + building.roofHeight * 0.55 + 0.5,
-        z: -building.depth * 0.18,
-      };
-      this.batch('roundedBox').add(
-        frame.clone().multiply(composeMatrix(chimney, {}, { x: 0.7, y: 1.6, z: 0.7 })),
-        darken(style?.wallColor ?? COLOR.ivory, 0.8),
-      );
-      this.batch('cylinder').add(
-        frame
-          .clone()
-          .multiply(
-            composeMatrix(
-              { x: chimney.x, y: chimney.y + 0.95, z: chimney.z },
-              {},
-              { x: 0.16, y: 0.4, z: 0.16 },
-            ),
-          ),
-        0x8a5a48,
+      box.add(
+        at(
+          {
+            x: volume.x,
+            y: top + parapet / 2,
+            z: volume.z + side * (volume.depth / 2 - thickness / 2),
+          },
+          { x: volume.width, y: parapet, z: thickness },
+        ),
+        wall,
       );
     }
   }
 
-  /** A door on the front wall, plus whatever marks the building out. */
-  private addDoorAndTrim(frame: Matrix4, building: Building): void {
+  /** One window: frame, sill, pane, glow, and shutters on a house. */
+  private addWindow(
+    frame: Matrix4,
+    at: At,
+    placement: WindowPlacement,
+    trim: number,
+    shutters: boolean,
+    lights: BuildingLights,
+  ): void {
+    const rotation = { y: placement.rotationY };
+    const nx = placement.normalX;
+    const nz = placement.normalZ;
+    // Along the wall, in the building's own axes.
+    const tx = Math.cos(placement.rotationY);
+    const tz = -Math.sin(placement.rotationY);
+
+    this.batch('windowFrame').add(
+      at(
+        { x: placement.x, y: placement.y, z: placement.z },
+        {
+          x: placement.width + 0.2,
+          y: placement.height + 0.2,
+          z: 0.1,
+        },
+        rotation,
+      ),
+      trim,
+    );
+    this.batch('windowSill').add(
+      at(
+        {
+          x: placement.x + nx * 0.1,
+          y: placement.y - placement.height / 2 - 0.1,
+          z: placement.z + nz * 0.1,
+        },
+        { x: placement.width + 0.36, y: 0.08, z: 0.26 },
+        rotation,
+      ),
+      COLOR.ivory,
+    );
+
+    if (shutters) {
+      const reach = placement.width / 2 + 0.24;
+      for (const side of [-1, 1]) {
+        this.batch('box').add(
+          at(
+            {
+              x: placement.x + tx * side * reach + nx * 0.05,
+              y: placement.y,
+              z: placement.z + tz * side * reach + nz * 0.05,
+            },
+            { x: 0.34, y: placement.height + 0.1, z: 0.06 },
+            rotation,
+          ),
+          trim,
+        );
+      }
+    }
+
+    lights.paneIndices.push(
+      this.batch('windowPane').add(
+        at(
+          { x: placement.x + nx * 0.07, y: placement.y, z: placement.z + nz * 0.07 },
+          { x: placement.width, y: placement.height, z: 1 },
+          rotation,
+        ),
+        new Color(0, 0, 0),
+      ),
+    );
+
+    const glowPosition = new Vector3(
+      placement.x + nx * GLOW_OFFSET,
+      placement.y,
+      placement.z + nz * GLOW_OFFSET,
+    ).applyMatrix4(frame);
+    const glowScale = Math.max(placement.width, 1.1) * GLOW_SCALE;
+    lights.glowIndices.push(
+      this.batch('windowGlow').add(composeMatrix(glowPosition, {}, glowScale), new Color(0, 0, 0)),
+    );
+    this.windowGlowBillboards.push({ position: glowPosition, scale: glowScale });
+  }
+
+  /**
+   * The door in the front wall, with its step; and on a shop the awning and
+   * the sign in the theme colour that make it a shop (DESIGN.md §4).
+   */
+  private addDoorAndFront(at: At, building: Building, ground: Volume, theme: number): void {
     const doorHeight = 2.2;
-    const doorWidth = building.kind === 'house' ? 1.2 : 2.2;
-    const front = building.depth / 2;
+    const shop = building.kind !== 'house';
+    const doorWidth = shop ? 2 : 1.2;
+    const front = ground.z + ground.depth / 2;
     const rounded = this.batch('roundedBox');
-    const at = (position: Placement, scale: Scale, rotation = {}): Matrix4 =>
-      frame.clone().multiply(composeMatrix(position, rotation, scale));
 
     rounded.add(
-      at({ x: 0, y: doorHeight / 2, z: front + 0.06 }, { x: doorWidth, y: doorHeight, z: 0.16 }),
-      building.style?.trimColor === COLOR.ivory ? COLOR.wood : 0x5a4636,
+      at(
+        { x: 0, y: ground.base + doorHeight / 2, z: front + 0.05 },
+        { x: doorWidth, y: doorHeight, z: 0.14 },
+      ),
+      theme,
     );
-
     rounded.add(
-      at({ x: 0, y: 0.08, z: front + 0.5 }, { x: doorWidth + 0.8, y: 0.16, z: 0.9 }),
-      COLOR.pavement,
+      at(
+        { x: 0, y: ground.base + doorHeight + 0.15, z: front + 0.05 },
+        { x: doorWidth + 0.3, y: 0.3, z: 0.18 },
+      ),
+      shop ? theme : COLOR.ivory,
+    );
+    rounded.add(
+      at({ x: 0, y: ground.base + 0.07, z: front + 0.5 }, { x: doorWidth + 0.9, y: 0.14, z: 0.9 }),
+      COLOR.stone,
     );
 
-    if (building.kind === 'cafe' || building.kind === 'bakery') {
-      rounded.add(
+    if (!shop) {
+      return;
+    }
+
+    const awned =
+      building.kind === 'cafe' || building.kind === 'bakery' || building.kind === 'supermarket';
+    if (awned) {
+      this.batch('box').add(
         at(
-          { x: 0, y: doorHeight + 0.9, z: front + 1 },
-          { x: building.width * 0.72, y: 0.22, z: 2.4 },
+          { x: 0, y: ground.base + doorHeight + 0.85, z: front + 0.85 },
+          { x: building.width * 0.74, y: 0.1, z: 1.8 },
+          { x: -0.32 },
         ),
-        building.kind === 'cafe' ? COLOR.awningCafe : COLOR.awningBakery,
+        theme,
       );
     }
 
-    if (building.kind === 'apartment') {
-      rounded.add(
-        at({ x: 0, y: doorHeight + 0.5, z: front + 0.7 }, { x: 3.4, y: 0.2, z: 1.6 }),
-        COLOR.ivory,
-      );
-    }
-
-    if (building.kind === 'school') {
-      // A little bell tower, so the school is recognisable from above.
-      rounded.add(
-        at({ x: 0, y: building.wallHeight + 1.7, z: 0 }, { x: 3, y: 3.4, z: 3 }),
-        COLOR.ivory,
-      );
-      this.batch('cone').add(
-        at(
-          { x: 0, y: building.wallHeight + 4.4, z: 0 },
-          { x: 2.4, y: 2, z: 2.4 },
-          { y: Math.PI / 4 },
-        ),
-        0x8a6a52,
-      );
-    }
-
-    if (building.kind === 'supermarket') {
-      // The one lit sign in town keeps its own material.
-      const sign = new Mesh(
-        new RoundedBoxGeometry(building.width * 0.6, 1.3, 0.3, 2, 0.1),
-        new MeshStandardMaterial({
-          color: 0x4f7a5c,
-          emissive: new Color(0x8fcf9f),
-          emissiveIntensity: 0.25,
-          roughness: 0.8,
-        }),
-      );
-      sign.applyMatrix4(at({ x: 0, y: building.wallHeight - 1.4, z: front + 0.15 }, 1));
-      this.root.add(sign);
-    }
+    // The sign: a board in the theme colour with a pale face.
+    const signY = ground.base + Math.min(ground.height - 0.8, doorHeight + 1.9);
+    rounded.add(
+      at({ x: 0, y: signY, z: front + 0.08 }, { x: building.width * 0.42, y: 0.72, z: 0.14 }),
+      theme,
+    );
+    rounded.add(
+      at({ x: 0, y: signY, z: front + 0.14 }, { x: building.width * 0.36, y: 0.46, z: 0.08 }),
+      COLOR.ivory,
+    );
   }
 
   /**
-   * The porch, balcony, fence, flower bed and one prop that make a house its
-   * own home (DESIGN.md §4). Everything is placed in the house's local space,
-   * in front of its door: +Z is the street side.
+   * What makes a house's roof its own (DESIGN.md §4): the blue dome on a
+   * few, and on the terrace beside the upper storey a washing line, pots, a
+   * water tank or a chair. An external stair up the front to the terrace.
    */
-  private addYard(frame: Matrix4, building: Building, style: HouseStyle): void {
-    const front = building.depth / 2;
-    const at = (position: Placement, scale: Scale, rotation = {}): Matrix4 =>
-      frame.clone().multiply(composeMatrix(position, rotation, scale));
+  private addHouseRoof(at: At, building: Building, style: HouseStyle, volumes: Volume[]): void {
+    const ground = volumes[0];
+    const upper = volumes[1];
+    const top = upper ?? ground;
+
+    if (style.dome) {
+      const y = top.base + top.height;
+      this.batch('cylinder').add(
+        at({ x: top.x, y: y + 0.28, z: top.z }, { x: 0.95, y: 0.56, z: 0.95 }),
+        COLOR.ivory,
+      );
+      this.batch('dome').add(at({ x: top.x, y: y + 0.52, z: top.z }, 1.05), COLOR.dome);
+    }
+
+    // The terrace: the part of the ground roof the upper storey leaves free.
+    const terraceX = upper ? -upper.x * 1.5 : 0;
+    const terraceY = ground.base + ground.height + 0.06;
+    const cylinder = this.batch('cylinder');
+    const box = this.batch('box');
+
+    switch (style.roofProp) {
+      case 'washing': {
+        const span = 1.1;
+        for (const side of [-1, 1]) {
+          cylinder.add(
+            at(
+              { x: terraceX + side * span, y: terraceY + 0.8, z: 0 },
+              { x: 0.05, y: 1.6, z: 0.05 },
+            ),
+            COLOR.ironwork,
+          );
+        }
+        box.add(
+          at({ x: terraceX, y: terraceY + 1.55, z: 0 }, { x: span * 2, y: 0.03, z: 0.03 }),
+          COLOR.ivory,
+        );
+        const cloths = Number(building.id.slice(-2)) % 2 === 0 ? 3 : 2;
+        for (let index = 0; index < cloths; index += 1) {
+          const x = terraceX + ((index + 0.5) / cloths - 0.5) * span * 1.7;
+          box.add(
+            at({ x, y: terraceY + 1.25, z: 0 }, { x: 0.42, y: 0.55, z: 0.03 }),
+            CLOTH_COLORS[(Number(building.id.slice(-2)) + index) % CLOTH_COLORS.length],
+          );
+        }
+        break;
+      }
+      case 'pots':
+        for (const offset of [-0.7, 0, 0.7]) {
+          cylinder.add(
+            at({ x: terraceX + offset, y: terraceY + 0.2, z: 0.6 }, { x: 0.24, y: 0.4, z: 0.24 }),
+            0xb8695a,
+          );
+          this.batch('sphere').add(
+            at({ x: terraceX + offset, y: terraceY + 0.55, z: 0.6 }, 0.26),
+            COLOR.foliage,
+          );
+        }
+        break;
+      case 'tank':
+        cylinder.add(
+          at({ x: terraceX, y: terraceY + 0.5, z: -0.3 }, { x: 0.55, y: 1, z: 0.55 }),
+          COLOR.ivory,
+        );
+        cylinder.add(
+          at({ x: terraceX, y: terraceY + 0.5, z: -0.3 }, { x: 0.58, y: 0.12, z: 0.58 }),
+          COLOR.ironwork,
+        );
+        break;
+      case 'chair':
+        box.add(
+          at({ x: terraceX, y: terraceY + 0.42, z: 0.3 }, { x: 0.5, y: 0.06, z: 0.5 }),
+          style.trimColor,
+        );
+        box.add(
+          at({ x: terraceX, y: terraceY + 0.68, z: 0.06 }, { x: 0.5, y: 0.5, z: 0.06 }),
+          style.trimColor,
+        );
+        for (const [dx, dz] of [
+          [-0.2, -0.2],
+          [0.2, -0.2],
+          [-0.2, 0.2],
+          [0.2, 0.2],
+        ]) {
+          box.add(
+            at({ x: terraceX + dx, y: terraceY + 0.2, z: 0.3 + dz }, { x: 0.05, y: 0.4, z: 0.05 }),
+            style.trimColor,
+          );
+        }
+        break;
+    }
+
+    if (style.stair && upper) {
+      // Solid masonry steps up the front wall, from the outer corner of the
+      // terrace side in towards the upper storey.
+      const steps = 7;
+      const rise = ground.height / steps;
+      const direction = -Math.sign(terraceX);
+      const startX = terraceX - direction * (building.width * 0.2 - 0.5);
+      for (let index = 0; index < steps; index += 1) {
+        const height = rise * (index + 1);
+        box.add(
+          at(
+            {
+              x: startX + direction * index * 0.44,
+              y: ground.base + height / 2,
+              z: ground.z + ground.depth / 2 + 0.5,
+            },
+            { x: 0.46, y: height, z: 0.9 },
+          ),
+          COLOR.ivory,
+        );
+      }
+    }
+  }
+
+  /** Equipment on a shop's roof: air conditioning, a vent, a tank. */
+  private addShopRoof(at: At, building: Building, volume: Volume): void {
+    const top = volume.base + volume.height + 0.06;
+    const rounded = this.batch('roundedBox');
+    const cylinder = this.batch('cylinder');
+    const units = building.kind === 'office' ? 3 : 2;
+    for (let index = 0; index < units; index += 1) {
+      const x = ((index + 0.5) / units - 0.5) * building.width * 0.5;
+      rounded.add(
+        at({ x, y: top + 0.36, z: -building.depth * 0.22 }, { x: 1, y: 0.72, z: 0.7 }),
+        COLOR.equipment,
+      );
+    }
+    cylinder.add(
+      at(
+        { x: building.width * 0.3, y: top + 0.45, z: building.depth * 0.2 },
+        {
+          x: 0.3,
+          y: 0.9,
+          z: 0.3,
+        },
+      ),
+      COLOR.equipment,
+    );
+    cylinder.add(
+      at(
+        { x: -building.width * 0.3, y: top + 0.5, z: building.depth * 0.18 },
+        {
+          x: 0.6,
+          y: 1,
+          z: 0.6,
+        },
+      ),
+      COLOR.ivory,
+    );
+  }
+
+  /**
+   * The flower bed and one prop that make a house its own home (DESIGN.md
+   * §4), in front of its door: +Z is the street side.
+   */
+  private addYard(
+    frame: Matrix4,
+    at: At,
+    building: Building,
+    style: HouseStyle,
+    ground: Volume,
+  ): void {
+    const front = ground.z + ground.depth / 2;
     const box = this.batch('box');
     const rounded = this.batch('roundedBox');
     const cylinder = this.batch('cylinder');
 
-    if (style.porch) {
-      rounded.add(
-        at({ x: 0, y: 0.1, z: front + 1 }, { x: building.width * 0.55, y: 0.2, z: 2 }),
-        style.trimColor,
-      );
-      for (const side of [-1, 1]) {
-        cylinder.add(
-          at(
-            { x: side * (building.width * 0.27 - 0.2), y: 1.45, z: front + 1.8 },
-            { x: 0.09, y: 2.5, z: 0.09 },
-          ),
-          style.trimColor,
-        );
-      }
-      rounded.add(
-        at({ x: 0, y: 2.75, z: front + 1 }, { x: building.width * 0.6, y: 0.18, z: 2.3 }),
-        style.roofColor,
-      );
-    }
-
-    if (style.balcony) {
-      const floorHeight = building.wallHeight / building.floors;
-      const y = floorHeight * 1.05;
-      rounded.add(
-        at({ x: building.width * 0.22, y, z: front + 0.6 }, { x: 3.2, y: 0.18, z: 1.2 }),
-        style.trimColor,
-      );
-      box.add(
-        at({ x: building.width * 0.22, y: y + 0.45, z: front + 1.16 }, { x: 3.2, y: 0.7, z: 0.08 }),
-        style.trimColor,
-      );
-    }
-
-    if (style.fence) {
-      const fenceZ = front + 3.6;
-      const halfWidth = building.width / 2 + 1;
-      box.add(at({ x: 0, y: 0.55, z: fenceZ }, { x: halfWidth * 2, y: 0.08, z: 0.08 }), COLOR.wood);
-      const postCount = Math.round(halfWidth * 2);
-      for (let index = 0; index < postCount; index += 1) {
-        // Leave the middle open as a gate.
-        const x = -halfWidth + (index / (postCount - 1)) * halfWidth * 2;
-        if (Math.abs(x) < 0.8) {
-          continue;
-        }
-        box.add(at({ x, y: 0.4, z: fenceZ }, { x: 0.12, y: 0.8, z: 0.12 }), COLOR.wood);
-      }
-    }
-
     if (style.flowerBed) {
       const rng = new Rng(`${building.id}:flowers`);
-      const bedWidth = building.width * 0.38;
+      const bedWidth = building.width * 0.34;
       this.flowerBed(
         frame,
         building.width / 2 - bedWidth - 0.2,
         building.width / 2 - 0.2,
-        front + 0.35,
-        front + 1.15,
+        front + 0.55,
+        front + 1.35,
         rng,
       );
     }
 
     const propX = -(building.width / 2 - 0.9);
-    const propZ = front + 2.6;
+    const propZ = front + 2.4;
     switch (style.prop) {
       case 'mailbox':
         cylinder.add(
           at({ x: propX, y: 0.55, z: propZ }, { x: 0.06, y: 1.1, z: 0.06 }),
           COLOR.ironwork,
         );
-        rounded.add(at({ x: propX, y: 1.2, z: propZ }, { x: 0.34, y: 0.3, z: 0.5 }), 0xd97b6c);
+        rounded.add(
+          at({ x: propX, y: 1.2, z: propZ }, { x: 0.34, y: 0.3, z: 0.5 }),
+          style.trimColor,
+        );
         break;
       case 'bin':
         cylinder.add(at({ x: propX, y: 0.45, z: propZ }, { x: 0.34, y: 0.9, z: 0.34 }), 0x5f6b73);
         break;
       case 'bicycle': {
-        const blue = 0x5f8fb5;
         for (const offset of [-0.5, 0.5]) {
           this.batch('torus').add(at({ x: propX + offset, y: 0.36, z: propZ }, 1), COLOR.ironwork);
         }
-        box.add(at({ x: propX, y: 0.62, z: propZ }, { x: 1.0, y: 0.06, z: 0.06 }), blue);
-        box.add(at({ x: propX - 0.15, y: 0.8, z: propZ }, { x: 0.06, y: 0.4, z: 0.06 }), blue);
+        box.add(at({ x: propX, y: 0.62, z: propZ }, { x: 1.0, y: 0.06, z: 0.06 }), style.trimColor);
+        box.add(
+          at({ x: propX - 0.15, y: 0.8, z: propZ }, { x: 0.06, y: 0.4, z: 0.06 }),
+          style.trimColor,
+        );
         break;
       }
       case 'flower-pots':
@@ -947,6 +1152,172 @@ export class TownView {
     }
   }
 
+  /**
+   * The church at the top of the slope (DESIGN.md §4): a white nave under a
+   * deep blue dome, a bell tower with open arches, a cross, and a warm lamp
+   * on the dome at night.
+   */
+  private addChurch(): void {
+    const { position, width, depth, rotationY } = CHURCH;
+    const ground = groundHeight(position.x, position.z);
+    const frame = composeMatrix({ x: position.x, y: ground, z: position.z }, { y: rotationY });
+    const at: At = (place, scale, rotation = {}) =>
+      frame.clone().multiply(composeMatrix(place, rotation, scale));
+    const box = this.batch('box');
+    const walls = this.batch('wallBox');
+    const wallHeight = 7;
+    const front = depth / 2;
+
+    box.add(
+      at(
+        { x: 0, y: PLINTH_LIP - PLINTH_DEPTH / 2, z: 0 },
+        { x: width + 1.2, y: PLINTH_DEPTH, z: depth + 1.2 },
+      ),
+      COLOR.stone,
+    );
+    // A forecourt in front of the door, out to the town.
+    box.add(at({ x: 0, y: 0.05, z: front + 3 }, { x: width + 4, y: 0.1, z: 6 }), COLOR.stone);
+
+    const nave: Volume = {
+      x: 0,
+      z: 0,
+      width,
+      depth,
+      base: PLINTH_LIP,
+      height: wallHeight,
+      floors: 1,
+    };
+    walls.add(
+      at({ x: 0, y: nave.base + wallHeight / 2, z: 0 }, { x: width, y: wallHeight, z: depth }),
+      WALL_WHITE,
+    );
+    this.addRoofSurface(at, nave, WALL_WHITE, 0.5);
+
+    // The dome on its drum, over the middle of the nave.
+    const domeRadius = 3.4;
+    const drumTop = nave.base + wallHeight + 1.6;
+    this.batch('cylinder').add(
+      at(
+        { x: 0, y: nave.base + wallHeight + 0.8, z: -1 },
+        { x: domeRadius - 0.1, y: 1.6, z: domeRadius - 0.1 },
+      ),
+      WALL_WHITE,
+    );
+    this.batch('dome').add(at({ x: 0, y: drumTop, z: -1 }, domeRadius), COLOR.dome);
+    // The cross on the dome, and the lamp beside it.
+    box.add(
+      at({ x: 0, y: drumTop + domeRadius + 0.7, z: -1 }, { x: 0.12, y: 1.4, z: 0.12 }),
+      COLOR.ivory,
+    );
+    box.add(
+      at({ x: 0, y: drumTop + domeRadius + 0.95, z: -1 }, { x: 0.7, y: 0.12, z: 0.12 }),
+      COLOR.ivory,
+    );
+    const lamp = new Vector3(0, drumTop + domeRadius + 0.2, -1).applyMatrix4(frame);
+    this.batch('lampCylinder').add(composeMatrix(lamp, {}, { x: 0.18, y: 0.3, z: 0.18 }));
+    this.batch('lampHalo').add(composeMatrix(lamp, {}, 7));
+    this.lampHaloBillboards.push({ position: lamp, scale: 7 });
+
+    // The bell tower on the front corner: open arches near the top, a small
+    // dome and a cross.
+    const towerX = width / 2 - 1.6;
+    const towerZ = front - 1.6;
+    const towerHeight = 13;
+    walls.add(
+      at(
+        { x: towerX, y: PLINTH_LIP + towerHeight / 2, z: towerZ },
+        { x: 2.8, y: towerHeight, z: 2.8 },
+      ),
+      WALL_WHITE,
+    );
+    for (const rotation of [0, Math.PI / 2]) {
+      box.add(
+        at(
+          { x: towerX, y: PLINTH_LIP + towerHeight - 2.2, z: towerZ },
+          { x: 1.1, y: 2.2, z: 3.0 },
+          { y: rotation },
+        ),
+        0x2a2a30,
+      );
+    }
+    this.batch('cylinder').add(
+      at({ x: towerX, y: PLINTH_LIP + towerHeight - 2.9, z: towerZ }, { x: 0.22, y: 0.5, z: 0.22 }),
+      0x8a6a3a,
+    );
+    this.batch('dome').add(
+      at({ x: towerX, y: PLINTH_LIP + towerHeight, z: towerZ }, 1.5),
+      COLOR.dome,
+    );
+    box.add(
+      at({ x: towerX, y: PLINTH_LIP + towerHeight + 2.1, z: towerZ }, { x: 0.1, y: 1.2, z: 0.1 }),
+      COLOR.ivory,
+    );
+    box.add(
+      at({ x: towerX, y: PLINTH_LIP + towerHeight + 2.3, z: towerZ }, { x: 0.6, y: 0.1, z: 0.1 }),
+      COLOR.ivory,
+    );
+
+    // The door, and the windows down the sides, all in deep blue.
+    this.batch('roundedBox').add(
+      at({ x: -1, y: PLINTH_LIP + 1.5, z: front + 0.05 }, { x: 1.8, y: 3, z: 0.14 }),
+      COLOR.dome,
+    );
+    this.batch('roundedBox').add(
+      at({ x: -1, y: PLINTH_LIP + 3.2, z: front + 0.05 }, { x: 2.2, y: 0.4, z: 0.16 }),
+      COLOR.dome,
+    );
+    for (const side of [-1, 1]) {
+      for (const along of [-5, -1.5, 2]) {
+        this.batch('windowFrame').add(
+          at(
+            { x: side * (width / 2 + 0.02), y: PLINTH_LIP + 3.6, z: along },
+            { x: 0.9, y: 2.2, z: 0.1 },
+            { y: Math.PI / 2 },
+          ),
+          COLOR.dome,
+        );
+      }
+    }
+  }
+
+  /**
+   * The lighthouse on the headland (DESIGN.md §4): a white tower with a red
+   * band on a rock, a lamp room, and the beam that sweeps round at night.
+   */
+  private addLighthouse(): void {
+    const { position, height } = LIGHTHOUSE;
+    const ground = groundHeight(position.x, position.z);
+    const cylinder = this.batch('cylinder');
+    const x = position.x;
+    const z = position.z;
+
+    cylinder.place({ x, y: ground + 0.4, z }, {}, { x: 4.2, y: 1.6, z: 4.2 }, COLOR.stone);
+    cylinder.place(
+      { x, y: ground + 1.2 + height / 2, z },
+      {},
+      { x: 1.55, y: height, z: 1.55 },
+      WALL_WHITE,
+    );
+    cylinder.place(
+      { x, y: ground + 1.2 + height * 0.45, z },
+      {},
+      { x: 1.6, y: 2, z: 1.6 },
+      0xc0473c,
+    );
+    // Gallery, lamp room and cap.
+    const galleryY = ground + 1.2 + height;
+    cylinder.place({ x, y: galleryY, z }, {}, { x: 2.2, y: 0.3, z: 2.2 }, COLOR.ironwork);
+    const lampY = galleryY + 1.05;
+    this.batch('lampCylinder').place({ x, y: lampY, z }, {}, { x: 1.05, y: 1.5, z: 1.05 });
+    this.batch('cone').place({ x, y: lampY + 1.2, z }, {}, { x: 1.3, y: 0.9, z: 1.3 }, 0xc0473c);
+    const halo = new Vector3(x, lampY, z);
+    this.batch('lampHalo').add(composeMatrix(halo, {}, 9));
+    this.lampHaloBillboards.push({ position: halo, scale: 9 });
+
+    this.beam.position.set(x, lampY, z);
+    this.root.add(this.beam);
+  }
+
   private addTrees(): void {
     const rng = new Rng('trees');
     const trunks = this.batch('trunk');
@@ -955,7 +1326,11 @@ export class TownView {
 
     for (const tree of TREES) {
       const frame = composeMatrix(
-        { x: tree.position.x, y: 0, z: tree.position.z },
+        {
+          x: tree.position.x,
+          y: groundHeight(tree.position.x, tree.position.z),
+          z: tree.position.z,
+        },
         { y: rng.nextFloat(0, Math.PI * 2) },
       );
       const trunkHeight = tree.height * 0.4;
@@ -1027,22 +1402,37 @@ export class TownView {
   private addStreetLamps(): void {
     for (const position of streetLampPositions()) {
       const { x, z } = position;
-      this.batch('lampPole').place({ x, y: STREET_LAMP_HEIGHT / 2, z }, {}, 1, COLOR.ironwork);
-      this.batch('lampHead').place({ x, y: STREET_LAMP_HEIGHT, z });
-      this.batch('lampBulb').place({ x, y: STREET_LAMP_HEIGHT - 0.22, z });
+      const ground = groundHeight(x, z);
+      const top = ground + STREET_LAMP_HEIGHT;
+      this.batch('lampPole').place(
+        { x, y: ground + STREET_LAMP_HEIGHT / 2, z },
+        {},
+        1,
+        COLOR.ironwork,
+      );
+      this.batch('lampHead').place({ x, y: top, z });
+      this.batch('lampBulb').place({ x, y: top - 0.22, z });
 
-      const haloPosition = new Vector3(x, STREET_LAMP_HEIGHT - 0.22, z);
+      const haloPosition = new Vector3(x, top - 0.22, z);
       this.batch('lampHalo').add(composeMatrix(haloPosition, {}, 3));
       this.lampHaloBillboards.push({ position: haloPosition, scale: 3 });
 
-      this.batch('lampPool').place({ x, y: PAVEMENT_HEIGHT + 0.04, z }, {}, { x: 9, z: 9 });
+      this.batch('lampPool').place(
+        { x, y: ground + PAVEMENT_HEIGHT + 0.04, z },
+        { x: groundTiltX(x, z) },
+        { x: 9, z: 9 },
+      );
     }
   }
 
   private addStreetSigns(): void {
     for (const sign of STREET_SIGNS) {
       const frame = composeMatrix(
-        { x: sign.position.x, y: 0, z: sign.position.z },
+        {
+          x: sign.position.x,
+          y: groundHeight(sign.position.x, sign.position.z),
+          z: sign.position.z,
+        },
         { y: sign.rotationY },
       );
       this.batch('cylinder').add(
@@ -1067,7 +1457,13 @@ export class TownView {
    * `deltaSeconds` is real time, so lights take the same moment to warm up
    * whatever speed the town is running at.
    */
-  update(world: World, environment: EnvironmentState, deltaSeconds: number, camera: Camera): void {
+  update(
+    world: World,
+    environment: EnvironmentState,
+    deltaSeconds: number,
+    elapsedSeconds: number,
+    camera: Camera,
+  ): void {
     const ease = 1 - Math.exp(-deltaSeconds / LIGHT_FADE_SECONDS);
     const panes = this.batch('windowPane').built;
     const glows = this.batch('windowGlow').built;
@@ -1108,6 +1504,11 @@ export class TownView {
     this.lampPoolMaterial.opacity = this.lampLit * 0.3;
     this.lampHaloMaterial.opacity = this.lampLit * 0.36;
 
+    // The beam sweeps on real time: at 20x the town sees a slow pulse.
+    this.beamMaterial.opacity = this.lampLit * 0.22;
+    this.beam.visible = this.lampLit > 0.01;
+    this.beam.rotation.y = (elapsedSeconds * Math.PI * 2) / BEAM_PERIOD_SECONDS;
+
     this.faceCamera(camera);
   }
 
@@ -1145,153 +1546,147 @@ interface WindowPlacement {
   normalZ: number;
 }
 
-/** Lays out windows in a grid on all four walls, in the building's local space. */
-function windowPlacements(building: Building): WindowPlacement[] {
-  const placements: WindowPlacement[] = [];
-  const floorHeight = building.wallHeight / building.floors;
-  const offset = 0.02;
-  const shopFront = building.kind === 'supermarket' || building.kind === 'cafe';
-  const modern = building.style?.roofKind === 'flat';
-  const width = shopFront ? 1.8 : modern ? 1.7 : 1.1;
-  const height = shopFront ? 1.9 : modern ? 1.6 : 1.35;
+/** A solid part of a building, in its local space: x across, +z the front, y up. */
+interface Volume {
+  x: number;
+  z: number;
+  width: number;
+  depth: number;
+  base: number;
+  height: number;
+  floors: number;
+}
 
-  const facades = [
-    { rotationY: 0, normalX: 0, normalZ: 1, span: building.width, depth: building.depth / 2 },
+/** Places something in a building's frame: position, scale, then rotation. */
+type At = (
+  position: Placement,
+  scale: Scale,
+  rotation?: { x?: number; y?: number; z?: number },
+) => Matrix4;
+
+/**
+ * The cubes a building is made of (DESIGN.md §4). A house is a full ground
+ * storey with a smaller upper storey set back to one side, leaving a roof
+ * terrace; a few houses and every public building are a single cube.
+ */
+function buildingVolumes(building: Building): Volume[] {
+  const style = building.style;
+  const base = PLINTH_LIP;
+  if (!style || style.upper === 'none') {
+    return [
+      {
+        x: 0,
+        z: 0,
+        width: building.width,
+        depth: building.depth,
+        base,
+        height: building.wallHeight,
+        floors: building.floors,
+      },
+    ];
+  }
+  const groundHeight = building.wallHeight * 0.52;
+  const side = style.upper === 'left' ? -1 : 1;
+  return [
     {
-      rotationY: Math.PI,
-      normalX: 0,
-      normalZ: -1,
-      span: building.width,
-      depth: building.depth / 2,
+      x: 0,
+      z: 0,
+      width: building.width,
+      depth: building.depth,
+      base,
+      height: groundHeight,
+      floors: 1,
     },
     {
-      rotationY: Math.PI / 2,
-      normalX: 1,
-      normalZ: 0,
-      span: building.depth,
-      depth: building.width / 2,
-    },
-    {
-      rotationY: -Math.PI / 2,
-      normalX: -1,
-      normalZ: 0,
-      span: building.depth,
-      depth: building.width / 2,
+      x: side * building.width * 0.2,
+      z: -building.depth * 0.04,
+      width: building.width * 0.6,
+      depth: building.depth * 0.92,
+      base: base + groundHeight,
+      height: building.wallHeight - groundHeight,
+      floors: 1,
     },
   ];
+}
 
-  for (const facade of facades) {
-    const columns = Math.max(1, Math.min(5, Math.floor(facade.span / (width + 2.2))));
-    for (let floor = 0; floor < building.floors; floor += 1) {
-      const y = floorHeight * (floor + 0.55);
-      for (let column = 0; column < columns; column += 1) {
-        const along = ((column + 0.5) / columns - 0.5) * facade.span * 0.84;
-        // The ground floor front wall keeps its middle clear for the door.
-        const isDoorway = facade.rotationY === 0 && floor === 0 && Math.abs(along) < 1.9;
-        if (isDoorway) {
-          continue;
+/**
+ * Lays out windows on the four walls of every volume, in the building's
+ * local space. Houses get small windows; a shop's ground floor front is
+ * glazed wide.
+ */
+function windowPlacements(building: Building, volumes: Volume[]): WindowPlacement[] {
+  const placements: WindowPlacement[] = [];
+  const shop = building.kind !== 'house';
+  const offset = 0.02;
+
+  volumes.forEach((volume, volumeIndex) => {
+    const floorHeight = volume.height / volume.floors;
+    const facades = [
+      { rotationY: 0, normalX: 0, normalZ: 1, span: volume.width, reach: volume.depth / 2 },
+      { rotationY: Math.PI, normalX: 0, normalZ: -1, span: volume.width, reach: volume.depth / 2 },
+      {
+        rotationY: Math.PI / 2,
+        normalX: 1,
+        normalZ: 0,
+        span: volume.depth,
+        reach: volume.width / 2,
+      },
+      {
+        rotationY: -Math.PI / 2,
+        normalX: -1,
+        normalZ: 0,
+        span: volume.depth,
+        reach: volume.width / 2,
+      },
+    ];
+
+    for (const facade of facades) {
+      for (let floor = 0; floor < volume.floors; floor += 1) {
+        const isFront = facade.rotationY === 0 && volumeIndex === 0 && floor === 0;
+        const shopFront = shop && isFront;
+        const width = shopFront ? 2.4 : shop ? 1.4 : 0.95;
+        const height = shopFront ? 2.1 : shop ? 1.5 : 1.15;
+        const gap = shopFront ? 1.0 : 1.9;
+        const columns = Math.max(1, Math.min(6, Math.floor(facade.span / (width + gap))));
+        const y = volume.base + floorHeight * (floor + (shopFront ? 0.5 : 0.56));
+        for (let column = 0; column < columns; column += 1) {
+          const along = ((column + 0.5) / columns - 0.5) * facade.span * 0.82;
+          // The front wall keeps its middle clear for the door.
+          if (isFront && Math.abs(along) < (shop ? 1.6 : 1.4)) {
+            continue;
+          }
+          placements.push({
+            x: volume.x + (facade.normalX === 0 ? along : facade.normalX * (facade.reach + offset)),
+            y,
+            z: volume.z + (facade.normalZ === 0 ? along : facade.normalZ * (facade.reach + offset)),
+            width,
+            height,
+            rotationY: facade.rotationY,
+            normalX: facade.normalX,
+            normalZ: facade.normalZ,
+          });
         }
-        placements.push({
-          x: facade.normalX === 0 ? along : facade.normalX * (facade.depth + offset),
-          y,
-          z: facade.normalZ === 0 ? along : facade.normalZ * (facade.depth + offset),
-          width,
-          height,
-          rotationY: facade.rotationY,
-          normalX: facade.normalX,
-          normalZ: facade.normalZ,
-        });
       }
     }
-  }
+  });
 
   return placements;
 }
 
-function wallColor(building: Building): number {
-  if (building.style) {
-    return building.style.wallColor;
-  }
-  switch (building.kind) {
-    case 'office':
-      return 0xc9cdd2;
-    case 'school':
-      return 0xe8dcc3;
-    case 'supermarket':
-      return 0xe4e6e1;
-    case 'apartment':
-      return 0xd9cfbf;
-    case 'cafe':
-      return 0xf1e6d2;
-    case 'bakery':
-      return 0xeadfc6;
-    default:
-      return COLOR.ivory;
-  }
-}
-
-/** The roof a building wears: pitched, hipped or flat, by kind and style. */
-function roofFor(building: Building): Mesh {
-  const style = building.style;
-  if (style?.roofKind === 'gable' || building.kind === 'bakery') {
-    return gableRoof(building, style?.roofColor ?? 0x8a6a52);
-  }
-  if (style?.roofKind === 'hip') {
-    return hipRoof(building, style.roofColor);
-  }
-  return flatRoof(building, style?.roofColor ?? 0x6f6a62);
-}
-
-/** A pitched roof, built as a triangle extruded along the building's depth. */
-function gableRoof(building: Building, color: number): Mesh {
-  const overhang = 0.55;
-  const halfWidth = building.width / 2 + overhang;
-
-  const profile = new Shape();
-  profile.moveTo(-halfWidth, 0);
-  profile.lineTo(halfWidth, 0);
-  profile.lineTo(0, building.roofHeight);
-  profile.closePath();
-
-  const depth = building.depth + overhang * 2;
-  const geometry = new ExtrudeGeometry(profile, { depth, bevelEnabled: false });
-  geometry.translate(0, 0, -depth / 2);
-
-  const roof = new Mesh(geometry, matte(color));
-  roof.position.y = building.wallHeight - 0.05;
-  roof.castShadow = true;
-  roof.receiveShadow = true;
-  return roof;
-}
-
-/** A hipped roof: a low four sided pyramid stretched over the footprint. */
-function hipRoof(building: Building, color: number): Mesh {
-  const overhang = 0.55;
-  const roof = new Mesh(new ConeGeometry(Math.SQRT1_2, 1, 4), matte(color));
-  roof.scale.set(building.width + overhang * 2, building.roofHeight, building.depth + overhang * 2);
-  roof.rotation.y = Math.PI / 4;
-  roof.position.y = building.wallHeight - 0.05 + building.roofHeight / 2;
-  roof.castShadow = true;
-  roof.receiveShadow = true;
-  return roof;
-}
-
-/** A flat roof with a low lip, used by the shops, the office and modern houses. */
-function flatRoof(building: Building, color: number): Mesh {
-  const roof = new Mesh(
-    new RoundedBoxGeometry(
-      building.width + 0.6,
-      building.roofHeight,
-      building.depth + 0.6,
-      2,
-      0.12,
-    ),
-    matte(color),
-  );
-  roof.position.y = building.wallHeight + building.roofHeight / 2 - 0.05;
-  roof.castShadow = true;
-  roof.receiveShadow = true;
-  return roof;
+/**
+ * The lighthouse beam: two long soft cones, back to back, drawn additive so
+ * they read as light in the air. The mesh turns about its own Y each frame.
+ */
+function makeBeam(material: MeshBasicMaterial): Mesh {
+  const cone = new CylinderGeometry(0.4, 3.2, BEAM_LENGTH, 10, 1, true);
+  cone.translate(0, -BEAM_LENGTH / 2, 0);
+  cone.rotateZ(Math.PI / 2);
+  const other = cone.clone().rotateY(Math.PI);
+  const geometry = mergeGeometries([cone, other]);
+  const beam = new Mesh(geometry, material);
+  beam.name = 'lighthouse-beam';
+  beam.frustumCulled = false;
+  return beam;
 }
 
 /**
@@ -1337,10 +1732,6 @@ function jitter(color: number, key: string): number {
   }
   const unit = ((hash >>> 0) % 1000) / 1000 - 0.5;
   return new Color(color).offsetHSL(unit * 0.01, unit * 0.04, unit * 0.05).getHex();
-}
-
-function darken(color: number, factor: number): number {
-  return new Color(color).multiplyScalar(factor).getHex();
 }
 
 let sharedGrassTexture: DataTexture | undefined;

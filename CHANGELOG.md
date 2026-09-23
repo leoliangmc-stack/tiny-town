@@ -1,5 +1,40 @@
 # Changelog
 
+## Phase 4.7a — The Greek island remake, round one: ground, buildings, landmarks
+
+The author's answer to "every building looks the same" (SPEC 2.3, 2.11, decision 29;
+DESIGN.md §1, §4, §7). Round two brings the dry planting, the lanes and steps and the
+terraced high street.
+
+- `world/Terrain.ts`: the ground leans towards the sea. Flat under the sand, it rises
+  nine metres across the town, linearly in z so every slab of road, pavement and paint
+  laid at the height of its centre and tilted to the grade meets the ground exactly, and
+  climbs on gently to the hills. The ground is a heightfield; streets, zones, props,
+  trees, lamps, citizens, vehicles, the forest, the beach and the hill rings all read
+  the same function. The simulation stays two dimensional; the state hash never sees a
+  height.
+- Buildings rebuilt in the island vernacular. Every one stands on a plinth of pale
+  stone that takes up the slope. Houses are two stacked white cubes: a full ground
+  storey and a smaller upper storey set back to one side, leaving a roof terrace with a
+  parapet, and on most a solid stair up the front to it; four carry a small blue dome.
+  Doors, shutters and window frames take one colour per house from the island set (sea
+  blue, deep blue, green, teal, wood). Six of the thirty houses are washed pale ochre,
+  rose or yellow; the rest are white. Terraces carry a washing line, pots, a water tank
+  or a chair. Shops and public buildings are single white cubes with one theme colour
+  each through door, awning and sign (cafe ochre-red, bakery mustard, supermarket sea
+  blue, school terracotta, office slate, apartments olive), wide glazing on the ground
+  floor front, and air conditioning, a vent and a tank on the roof.
+- Two landmarks. The church at the top of the slope: a white nave under a deep blue
+  dome, a bell tower with open arches, a cross, deep blue door and windows, and a warm
+  lamp on the dome at night. The lighthouse on the headland: a white tower with a red
+  band on a rock, a lamp room, and a beam that sweeps round every six real seconds,
+  the one light in the night that moves; at 20x it reads as a slow pulse.
+- Walls are now instances of one rounded unit box, so the whole town's walls are one
+  draw call where forty meshes were. Draw calls 221 → 73 by day and 74 by night (the
+  beam); p95 frame time 17.7 ms by day, 18.3 ms at night.
+- Camera framing includes the church; the target and the framed height follow the
+  slope.
+
 ## Phase 4.6 — Environment and sky
 
 Revised again for the camera (decision 28): the default view could not see the sky.

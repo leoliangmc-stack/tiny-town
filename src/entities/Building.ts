@@ -3,24 +3,30 @@ import type { Point } from './geometry.js';
 export type BuildingKind =
   'house' | 'apartment' | 'cafe' | 'school' | 'supermarket' | 'bakery' | 'office';
 
-export type RoofKind = 'gable' | 'hip' | 'flat';
-
 /** What a house's front yard holds, so each home shows a sign of life (DESIGN.md §4). */
 export type YardProp = 'mailbox' | 'bicycle' | 'bin' | 'flower-pots' | 'none';
 
+/** What stands on a house's roof terrace (DESIGN.md §4). */
+export type RoofProp = 'washing' | 'pots' | 'tank' | 'chair';
+
 /**
- * How one house looks. Every house gets its own combination so no two homes
- * read the same (SPEC.md 2.3). The values are chosen in world/Town.ts from the
- * house number, so they never change between runs.
+ * How one house looks, in the island vernacular (SPEC.md 2.3, decision 29).
+ * Every house gets its own combination so no two homes read the same. The
+ * values are chosen in world/Town.ts from the house number, so they never
+ * change between runs.
  */
 export interface HouseStyle {
-  roofKind: RoofKind;
-  roofColor: number;
+  /** Which side the set-back upper storey stands on; 'none' is a single cube. */
+  upper: 'left' | 'right' | 'none';
+  /** A small blue dome on the top of the house. */
+  dome: boolean;
+  /** White, or one of the pale washes on a fifth of the houses. */
   wallColor: number;
+  /** Door, shutters and window frames, one colour per house. */
   trimColor: number;
-  porch: boolean;
-  balcony: boolean;
-  fence: boolean;
+  /** An external stair up the front to the roof terrace. */
+  stair: boolean;
+  roofProp: RoofProp;
   /** A strip of flowers along the front of the house. */
   flowerBed: boolean;
   prop: YardProp;
@@ -43,7 +49,7 @@ export interface Building {
   depth: number;
   /** Height of the walls, without the roof. */
   wallHeight: number;
-  /** Extra height of the roof above the walls. */
+  /** Height of the parapet above the roof. */
   roofHeight: number;
   rotationY: number;
   /** Number of window rows on the facades. */

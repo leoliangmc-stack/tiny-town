@@ -1,4 +1,4 @@
-import type { Building, HouseStyle, RoofKind, YardProp } from '../entities/Building.js';
+import type { Building, HouseStyle, RoofProp, YardProp } from '../entities/Building.js';
 import { footprintBounds } from '../entities/Building.js';
 import type { Point } from '../entities/geometry.js';
 
@@ -136,12 +136,15 @@ function row(
 }
 
 /**
- * Wall and roof colours, all warm and low in saturation (DESIGN.md §10).
- * Houses draw from these by number, so the mix down a street is fixed.
+ * The island colours (DESIGN.md §10). Walls are white; a fifth of the houses
+ * take a pale wash instead. Doors and shutters draw one colour from the
+ * accent set. Houses draw by number, so the mix down a street is fixed.
  */
-const WALL_COLORS = [0xf1ebdf, 0xeadfc6, 0xd8d5cf, 0xc5d3dc, 0xcfd8c2, 0xb9a58c, 0xecd9c4];
-const ROOF_COLORS = [0xb8695a, 0x5f5e5c, 0x6e7f8c, 0x8a6a52, 0x7f9478, 0xa65f4f];
+export const WALL_WHITE = 0xf7f4ee;
+const WALL_WASHES = [0xf1dcbf, 0xf3d9d2, 0xf5ecc6];
+export const ACCENT_COLORS = [0x3f7fb8, 0x2b4c8c, 0x4e8a6a, 0x3f8f8a, 0x9a7452];
 const YARD_PROPS: readonly YardProp[] = ['mailbox', 'flower-pots', 'bicycle', 'bin', 'mailbox'];
+const ROOF_PROPS: readonly RoofProp[] = ['washing', 'pots', 'tank', 'chair'];
 
 /**
  * Every building in the town.
@@ -197,7 +200,7 @@ export const BUILDINGS: readonly Building[] = [
     width: 12,
     depth: 8,
     wallHeight: 5,
-    roofHeight: 2.8,
+    roofHeight: 0.5,
     rotationY: Math.PI,
     floors: 1,
   },
@@ -255,21 +258,16 @@ export const BUILDINGS: readonly Building[] = [
  * number, so a house is the same every time and no two are alike.
  */
 function houseStyle(n: number): HouseStyle {
-  let roofKind: RoofKind = 'gable';
-  if (n % 5 === 0) {
-    roofKind = 'flat';
-  } else if (n % 3 === 0) {
-    roofKind = 'hip';
-  }
-
+  const upper: HouseStyle['upper'] = n % 7 === 0 ? 'none' : n % 2 === 1 ? 'left' : 'right';
+  // Six of the thirty houses take a wash: eight parts white, two parts colour.
+  const washed = n % 5 === 2;
   return {
-    roofKind,
-    roofColor: ROOF_COLORS[(n * 7) % ROOF_COLORS.length],
-    wallColor: WALL_COLORS[(n * 3) % WALL_COLORS.length],
-    trimColor: n % 2 === 0 ? 0xf5f0e6 : 0x6b5a48,
-    porch: roofKind === 'gable' && n % 2 === 1,
-    balcony: roofKind === 'hip' || (roofKind === 'flat' && n % 2 === 0),
-    fence: n % 4 === 1 || n % 4 === 2,
+    upper,
+    dome: n % 8 === 3,
+    wallColor: washed ? WALL_WASHES[Math.floor(n / 5) % WALL_WASHES.length] : WALL_WHITE,
+    trimColor: ACCENT_COLORS[(n * 3 + Math.floor(n / 5)) % ACCENT_COLORS.length],
+    stair: upper !== 'none' && n % 3 !== 0,
+    roofProp: ROOF_PROPS[n % ROOF_PROPS.length],
     flowerBed: n % 3 !== 0,
     prop: YARD_PROPS[n % YARD_PROPS.length],
   };
@@ -283,7 +281,6 @@ function house(number: number, x: number, z: number, rotationY: number): Buildin
   const wobble = (offset: number, amount: number): number =>
     ((number * 37 + offset) % 7) * (amount / 7);
   const style = houseStyle(number);
-  const modern = style.roofKind === 'flat';
 
   return {
     id: `house-${String(number).padStart(2, '0')}`,
@@ -292,8 +289,8 @@ function house(number: number, x: number, z: number, rotationY: number): Buildin
     position: { x, z },
     width: isEndBlock(x) ? 8.2 + wobble(0, 0.6) : 8.4 + wobble(0, 1.2),
     depth: 6.8 + wobble(3, 1.2),
-    wallHeight: (modern ? 5.6 : 4.9) + wobble(5, 1.2),
-    roofHeight: modern ? 0.5 : 2.4 + wobble(1, 1.2),
+    wallHeight: (style.upper === 'none' ? 5.2 : 5.6) + wobble(5, 0.8),
+    roofHeight: 0.45,
     rotationY,
     floors: 2,
     style,
@@ -587,6 +584,25 @@ export const TRAFFIC_LIGHTS: readonly TrafficLight[] = [
   { x: 18, z: 0, greenMinutes: 1.5 },
 ];
 
+/**
+ * The two landmarks (SPEC.md 2.3, decision 29): the church at the top of the
+ * slope behind the southern houses, and the lighthouse on the headland
+ * where the shore runs furthest out to sea. Neither is on the navigation
+ * graphs; they are places to look at, not to go to.
+ */
+export const CHURCH = {
+  position: { x: 0, z: 76 },
+  width: 12,
+  depth: 17,
+  /** The front, with its door and bell tower, faces the town. */
+  rotationY: Math.PI,
+} as const;
+
+export const LIGHTHOUSE = {
+  position: { x: 63, z: -79 },
+  height: 16,
+} as const;
+
 export const STREET_LAMP_HEIGHT = 5.2;
 
 /** Street lamps, spaced along the pavement of every street. */
@@ -693,6 +709,8 @@ export function townBounds(): { minX: number; maxX: number; minZ: number; maxZ: 
   }
   include(PARKING_LOT.minX, PARKING_LOT.minZ);
   include(PARKING_LOT.maxX, PARKING_LOT.maxZ);
+  include(CHURCH.position.x - CHURCH.width / 2, CHURCH.position.z - CHURCH.depth / 2);
+  include(CHURCH.position.x + CHURCH.width / 2, CHURCH.position.z + CHURCH.depth / 2);
 
   return { minX, maxX, minZ, maxZ };
 }

@@ -19,6 +19,7 @@ import type { Vehicle } from '../entities/Vehicle.js';
 import { VehicleSystem } from '../simulation/VehicleSystem.js';
 import type { World } from '../simulation/World.js';
 import { VEHICLE_SIZE } from '../world/Fleet.js';
+import { groundHeight } from '../world/Terrain.js';
 
 import type { EnvironmentState } from './Environment.js';
 import { glowTexture } from './glow.js';
@@ -168,7 +169,7 @@ export class VehicleView {
     const size = VEHICLE_SIZE[vehicle.kind];
     const base = new Matrix4()
       .makeRotationY(drawn.heading)
-      .setPosition(drawn.x, WHEEL_RADIUS, drawn.z);
+      .setPosition(drawn.x, groundHeight(drawn.x, drawn.z) + WHEEL_RADIUS, drawn.z);
     const place = (
       part: Part,
       slot: number,
