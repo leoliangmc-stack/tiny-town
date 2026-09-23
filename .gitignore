@@ -42,3 +42,5 @@ docs/phase-6-screenshots/
 
 # Phase review screenshots, kept locally for the author to look at
 docs/phase-7-screenshots/
+.vercel
+.env*

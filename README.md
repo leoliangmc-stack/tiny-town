@@ -78,9 +78,10 @@ with a colour per instance.
 
 ## Deploying
 
-`.github/workflows/deploy.yml` builds and publishes `dist/` to GitHub Pages on every
-`v*` or `phase-*` tag. Enable Pages once in the repository settings (Source: GitHub
-Actions), then tag. The build uses relative asset paths, so it also works from any static
+The site is hosted on Vercel. `.github/workflows/deploy.yml` builds, tests and publishes
+to production on every `v*` or `phase-*` tag, with the Vercel CLI in prebuilt mode, so a
+tag is the release. It needs one repository secret, `VERCEL_TOKEN`. `vercel.json` holds
+the build settings; the build uses relative asset paths, so it also works from any static
 host or a subdirectory.
 
 ## Assets and licensing

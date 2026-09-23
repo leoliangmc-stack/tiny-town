@@ -1,44 +1,49 @@
 name: Deploy
 
-# Every phase or version tag publishes the built site to GitHub Pages.
-# Pages must be enabled once in the repository settings (Source: GitHub
-# Actions); after that a tag is all it takes.
+# Every phase or version tag builds the site and publishes it to Vercel
+# production, so a tag is the release and nothing depends on remembering to
+# run `vercel --prod` by hand.
+#
+# Needs one repository secret: VERCEL_TOKEN (Vercel → Settings → Tokens).
+# The org and project ids below are those of the linked project and are not
+# secrets.
 on:
   push:
     tags: ['v*', 'phase-*']
   workflow_dispatch:
 
-permissions:
-  contents: read
-  pages: write
-  id-token: write
+env:
+  VERCEL_ORG_ID: team_nTPTcbV5AjkwXxDcuy2lAYWf
+  VERCEL_PROJECT_ID: prj_nA7IRdhdvzJsFDDbhmsHmLO0zmB9
 
 concurrency:
-  group: pages
-  cancel-in-progress: true
+  group: deploy
+  cancel-in-progress: false
 
 jobs:
-  build:
+  deploy:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
-      - run: npm ci
-      - run: npm test
-      - run: npm run build
-      - uses: actions/upload-pages-artifact@v3
-        with:
-          path: dist
 
-  deploy:
-    needs: build
-    runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - id: deployment
-        uses: actions/deploy-pages@v4
+      - run: npm ci
+
+      - name: Test
+        run: npm test
+
+      - name: Install Vercel CLI
+        run: npm install -g vercel@59
+
+      - name: Pull Vercel project settings
+        run: vercel pull --yes --environment=production --token=${{ secrets.VERCEL_TOKEN }}
+
+      - name: Build
+        run: vercel build --prod --token=${{ secrets.VERCEL_TOKEN }}
+
+      - name: Deploy to production
+        run: vercel deploy --prebuilt --prod --token=${{ secrets.VERCEL_TOKEN }}

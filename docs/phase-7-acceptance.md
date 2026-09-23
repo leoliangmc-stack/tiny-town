@@ -40,6 +40,6 @@ not loaded by the page. Total on the wire about 200 kB, under the 2 MB target.
 
 ## Deployment
 
-`.github/workflows/deploy.yml` publishes `dist/` to GitHub Pages on every `v*` or
-`phase-*` tag. It needs the repository to have Pages enabled (Settings → Pages → Source:
-GitHub Actions) and a remote to push to; neither exists yet.
+Vercel, project `tiny-town` on the author's account. `.github/workflows/deploy.yml`
+tests, builds and publishes to production on every `v*` or `phase-*` tag. It needs the
+repository to have a GitHub remote (none yet) and the `VERCEL_TOKEN` secret.

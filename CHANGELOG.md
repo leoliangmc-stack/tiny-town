@@ -28,8 +28,12 @@ The last v1 phase (PHASES.md Phase 7), with three small fixes from the Phase 6 r
   assets (none: everything is generated) and the MIT licence. `docs/media/timelapse.gif`
   is a day at 6 game minutes a frame, 640×360, 5.6 MB; an MP4 of the same is in the
   Phase 7 screenshots.
-- Deploy: `.github/workflows/deploy.yml` publishes `dist/` to GitHub Pages on every
-  `v*` or `phase-*` tag, once Pages is enabled and a remote exists.
+- Deploy: the author chose Vercel. `vercel.json` sets the Vite build, the output
+  directory, a year of caching on hashed assets and the Sydney region (which only
+  functions would use; the site is static and served from the CDN). The project is
+  linked to the author's account as `tiny-town`. `.github/workflows/deploy.yml` tests,
+  builds and publishes to production on every `v*` or `phase-*` tag with the Vercel
+  CLI in prebuilt mode, so a tag is the release; it needs the `VERCEL_TOKEN` secret.
 - Bundle: 745 kB of JS (199 kB gzip) plus 4.5 kB of CSS; about 200 kB on the wire.
 - Acceptance: SPEC 5.2 tests 1 to 5 run on the desktop and recorded in
   `docs/phase-7-acceptance.md` with the frame times per tier. The phone column is the
