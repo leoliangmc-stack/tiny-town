@@ -8,7 +8,7 @@ weather and a lighthouse keep time over them.
 
 _A day at 20x, from dawn to dawn._
 
-**Live demo:** _coming with the first tagged release; see Deploying below._
+**Live demo:** [tiny-town-henna.vercel.app](https://tiny-town-henna.vercel.app) · **Source:** [github.com/leoliangmc-stack/tiny-town](https://github.com/leoliangmc-stack/tiny-town)
 
 ## What it is
 
@@ -78,11 +78,17 @@ with a colour per instance.
 
 ## Deploying
 
-The site is hosted on Vercel. `.github/workflows/deploy.yml` builds, tests and publishes
-to production on every `v*` or `phase-*` tag, with the Vercel CLI in prebuilt mode, so a
-tag is the release. It needs one repository secret, `VERCEL_TOKEN`. `vercel.json` holds
-the build settings; the build uses relative asset paths, so it also works from any static
-host or a subdirectory.
+The site is hosted on Vercel at [tiny-town-henna.vercel.app](https://tiny-town-henna.vercel.app),
+two ways:
+
+- **Git integration.** The Vercel project is connected to this repository: every push to
+  `main` deploys to production and every other branch gets a preview URL.
+- **Tag release.** `.github/workflows/deploy.yml` tests, builds and publishes to production
+  on every `v*` or `phase-*` tag with the Vercel CLI in prebuilt mode. It needs one
+  repository secret, `VERCEL_TOKEN`.
+
+`vercel.json` holds the build settings; the build uses relative asset paths, so it also
+works from any static host or a subdirectory.
 
 ## Assets and licensing
 

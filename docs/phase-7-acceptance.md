@@ -40,6 +40,7 @@ not loaded by the page. Total on the wire about 200 kB, under the 2 MB target.
 
 ## Deployment
 
-Vercel, project `tiny-town` on the author's account. `.github/workflows/deploy.yml`
-tests, builds and publishes to production on every `v*` or `phase-*` tag. It needs the
-repository to have a GitHub remote (none yet) and the `VERCEL_TOKEN` secret.
+Live at https://tiny-town-henna.vercel.app (Vercel project `tiny-town`, connected to
+https://github.com/leoliangmc-stack/tiny-town). Pushes to `main` deploy to production
+through the Git integration; `.github/workflows/deploy.yml` also deploys on every `v*`
+or `phase-*` tag once the `VERCEL_TOKEN` secret is set.
