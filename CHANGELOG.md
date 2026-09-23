@@ -1,5 +1,42 @@
 # Changelog
 
+## Phase 6 — Interaction and UI
+
+The observation tools over the town (SPEC 2.9, DESIGN.md §15), in `src/ui/`.
+
+- One set of components, two layouts by stylesheet. Wide screens: weather top left,
+  town status top right, the selected citizen on the right, play and the four speeds
+  along the bottom. Portrait: a capsule top left with the day, the time and the weather
+  (tap to cycle it), a fixed time bar at the bottom, and above it a sheet that opens in
+  three steps: collapsed shows the latest diary line, half shows the town status and the
+  diary, full the diary at length. Translucent ivory cards, deep grey text, sage for the
+  active state, warm orange for the one action. In portrait at default zoom the UI covers
+  11% of the screen; there is no layout shift on load (CLS 0).
+- Town status: day, time, people, outside, cars on the road, weather, live.
+- Selection: a tap on the canvas picks the citizen drawn nearest to it within 18 px by
+  mouse or 36 px by touch, counting only people who can be seen (on foot or in a car). A
+  press that moves or lingers is a camera gesture, not a tap. The panel says who they
+  are and what they are doing in plain words from `ui/phrases.ts`: name, age, job, what
+  they are doing now ("Walking to work", "Chatting on the cafe terrace"), home by its
+  name, family by relation and name, friends by name. No ids, no state. In portrait the
+  sheet opens to the panel; tapping empty ground closes it and restores the sheet.
+- Follow: the camera flies to the citizen over 1.4 s and stays with them, keeping the
+  viewer's bearing and letting them orbit and zoom. The followed point is eased over
+  0.22 s, so the hand-offs at doors and car doors that `World.followTarget` already
+  smooths never jump. Stop following flies back to the default framing and hands the
+  camera to the night tilt. Measured with Playwright following Rex from home to the
+  car to the office at 5x over 26 s: four hand-offs (foot, car, foot, indoors), largest
+  camera move between frames 1.6 m, on both layouts.
+- Back to town: once the viewer has dragged, wheeled or pinched, a small pill appears
+  (bottom right on desktop, top right in portrait) that flies the camera home and gives it
+  back to the automatic framing; it goes away on arrival.
+- Keys 1 to 4, space, S, C and R stay as hidden power-user keys; nothing in the UI names
+  them.
+- `App` gained `pickCitizen`, `follow`, `stopFollowing`, `returnToTown`, `cameraTaken`
+  and a per-frame listener the UI reads from; no town logic lives in the UI. Draw calls
+  84, p95 17.5 ms with the UI mounted. Tests: the panel's words for every citizen at
+  five times of day carry no ids and match the state.
+
 ## Fix — pavements that stop at the junction
 
 The author circled stubs of pavement standing in the road at every junction.

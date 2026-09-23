@@ -11,12 +11,13 @@ import {
 } from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 
+import { isAboard, isOutside } from '../entities/Citizen.js';
 import { DEFAULT_SPEED, type SpeedLevel } from '../simulation/constants.js';
 import type { Weather } from '../simulation/WeatherSystem.js';
 import { TickScheduler } from '../simulation/TickScheduler.js';
 import { World } from '../simulation/World.js';
 
-import { TOWN_RISE } from '../world/Terrain.js';
+import { groundHeight, TOWN_RISE } from '../world/Terrain.js';
 import { townBounds } from '../world/Town.js';
 
 import { CitizenView } from './CitizenView.js';
@@ -105,7 +106,34 @@ const CLOUD_AMOUNT: Record<Weather, number> = { Sunny: 0, Cloudy: 0.7, Rain: 1 }
 const WEATHER_EASE_SECONDS = 1.6;
 const DRY_OUT_SECONDS = 6;
 
-/** Speeds reachable from the keyboard while there is no UI yet. */
+/**
+ * Follow (SPEC.md 2.9, Test 5): the camera sits this far from the citizen,
+ * this high, and eases onto them; a flight to or from a citizen takes this
+ * long. The eased target smooths the hand-offs at doors and car doors,
+ * which are a few metres at most (Phase 4's test).
+ */
+const FOLLOW_DISTANCE = 30;
+const FOLLOW_PITCH = (32 * Math.PI) / 180;
+const FOLLOW_EASE_SECONDS = 0.22;
+const FLIGHT_SECONDS = 1.4;
+const FOLLOW_LOOK_HEIGHT = 1.2;
+
+/** A camera framing: where the lens is and what it looks at. */
+interface Framing {
+  position: Vector3;
+  target: Vector3;
+}
+
+/** A flight from one framing to another, eased over FLIGHT_SECONDS. */
+interface Flight {
+  from: Framing;
+  to: () => Framing;
+  elapsed: number;
+  /** What to do when the lens arrives. */
+  onArrive: () => void;
+}
+
+/** Hidden power-user keys; the UI is the way in (SPEC.md 2.9). */
 const SPEED_KEYS: Record<string, SpeedLevel> = {
   Digit1: 1,
   Digit2: 5,
@@ -155,6 +183,11 @@ export class App {
    * (SPEC.md 2.9): the free view wins over any automatic move.
    */
   private autoFraming = true;
+  /** The citizen the camera follows, if any (SPEC.md 2.9). */
+  private followingId: string | undefined;
+  private readonly followPoint = new Vector3();
+  private flight: Flight | undefined;
+  private readonly frameListeners: Array<() => void> = [];
   /** A pointer or wheel is held on the controls right now. */
   private pointerDown = false;
 
@@ -251,6 +284,16 @@ export class App {
    * Called every frame while the viewer has not taken the camera.
    */
   private placeDefaultCamera(): void {
+    const framing = this.defaultFraming();
+    this.camera.position.copy(framing.position);
+    this.controls.target.copy(framing.target);
+  }
+
+  /**
+   * The default framing for this screen shape and this hour, without
+   * moving anything: the place a flight home aims at.
+   */
+  private defaultFraming(): Framing {
     const portrait = this.aspectRatio() < 1;
     const view = portrait ? PORTRAIT_VIEW : LANDSCAPE_VIEW;
 
@@ -284,21 +327,22 @@ export class App {
     const distance = this.fitDistance(direction, lift) * view.margin;
 
     const target = CAMERA_TARGET.clone().setY(CAMERA_TARGET.y + lift);
-    this.camera.position.copy(direction).multiplyScalar(distance).add(target);
-    this.controls.target.copy(target);
+    const position = direction.clone().multiplyScalar(distance).add(target);
 
     // Let the viewer come in close and pull back a little further than the
     // default, but no further. A limit left over from a smaller town would
     // quietly drag the camera in and crop the framing.
-    this.controls.minDistance = 25;
-    this.controls.maxDistance = distance * 1.6;
-    this.controls.update();
+    if (!this.followingId) {
+      this.controls.minDistance = 25;
+      this.controls.maxDistance = distance * 1.6;
+    }
 
     // Keep the haze behind the town whatever distance the framing chose.
     // The haze must start beyond the far side of the town, or the whole
     // picture goes milky; the town sits between about 0.7 and 1.4 times the
     // framing distance from the lens.
     this.environment.setFogRange(distance * 1.35, distance * 1.35 + 360);
+    return { position, target };
   }
 
   /**
@@ -410,12 +454,188 @@ export class App {
 
     this.debugView?.update(this.world);
 
-    if (this.autoFraming && !this.pointerDown) {
+    if (this.flight) {
+      this.fly(deltaSeconds);
+    } else if (this.followingId) {
+      this.trackFollowed(deltaSeconds);
+    } else if (this.autoFraming && !this.pointerDown) {
       this.placeDefaultCamera();
     }
     this.controls.update();
     this.renderer.render(this.scene, this.camera);
+
+    for (const listener of this.frameListeners) {
+      listener();
+    }
   };
+
+  // --- Selection and follow (SPEC.md 2.9) ----------------------------------
+
+  /** The canvas, for the UI to listen to taps on. */
+  get canvas(): HTMLCanvasElement {
+    return this.renderer.domElement;
+  }
+
+  /** Called after every frame; the UI reads the world from here. */
+  addFrameListener(listener: () => void): void {
+    this.frameListeners.push(listener);
+  }
+
+  get following(): string | undefined {
+    return this.followingId;
+  }
+
+  /** True once the viewer has taken the camera and nothing is bringing it back. */
+  get cameraTaken(): boolean {
+    return !this.autoFraming && !this.followingId && !this.flight;
+  }
+
+  get isPortrait(): boolean {
+    return this.aspectRatio() < 1;
+  }
+
+  /**
+   * The citizen drawn nearest to a point on the screen, within `radiusPx`,
+   * or nothing. Only people who can be seen count: on foot or in a car.
+   */
+  pickCitizen(clientX: number, clientY: number, radiusPx: number): string | undefined {
+    const rect = this.renderer.domElement.getBoundingClientRect();
+    const projected = new Vector3();
+    let best: string | undefined;
+    let bestDistance = radiusPx;
+    for (const citizen of this.world.citizens) {
+      if (!isOutside(citizen) && !isAboard(citizen)) {
+        continue;
+      }
+      const target = this.world.followTarget(citizen.id);
+      if (!target) {
+        continue;
+      }
+      projected.set(
+        target.position.x,
+        groundHeight(target.position.x, target.position.z) + 1,
+        target.position.z,
+      );
+      projected.project(this.camera);
+      if (projected.z > 1) {
+        continue;
+      }
+      const screenX = rect.left + ((projected.x + 1) / 2) * rect.width;
+      const screenY = rect.top + ((1 - projected.y) / 2) * rect.height;
+      const away = Math.hypot(screenX - clientX, screenY - clientY);
+      if (away < bestDistance) {
+        bestDistance = away;
+        best = citizen.id;
+      }
+    }
+    return best;
+  }
+
+  /** Flies to a citizen and stays with them until stopFollowing. */
+  follow(citizenId: string): void {
+    const target = this.world.followTarget(citizenId);
+    if (!target) {
+      return;
+    }
+    this.followingId = citizenId;
+    this.autoFraming = false;
+    this.controls.enablePan = false;
+    this.controls.minDistance = 8;
+    this.controls.maxDistance = 90;
+    this.followPoint.set(
+      target.position.x,
+      groundHeight(target.position.x, target.position.z) + FOLLOW_LOOK_HEIGHT,
+      target.position.z,
+    );
+    // Keep the viewer's bearing; come down to a good height and distance.
+    const bearing = this.camera.position.clone().sub(this.controls.target);
+    const yaw = Math.atan2(bearing.x, bearing.z);
+    const offset = new Vector3(
+      Math.sin(yaw) * Math.cos(FOLLOW_PITCH),
+      Math.sin(FOLLOW_PITCH),
+      Math.cos(yaw) * Math.cos(FOLLOW_PITCH),
+    ).multiplyScalar(FOLLOW_DISTANCE);
+    this.startFlight(
+      () => ({ position: this.followPoint.clone().add(offset), target: this.followPoint.clone() }),
+      () => undefined,
+    );
+  }
+
+  /** Lets the citizen go and flies back to the god view (SPEC.md 2.9). */
+  stopFollowing(): void {
+    if (!this.followingId) {
+      return;
+    }
+    this.followingId = undefined;
+    this.returnToTown();
+  }
+
+  /**
+   * Hands the camera back to the default framing and the night tilt, with a
+   * flight rather than a cut: the "back to town" the SPEC promised.
+   */
+  returnToTown(): void {
+    this.followingId = undefined;
+    this.controls.enablePan = true;
+    this.startFlight(
+      () => this.defaultFraming(),
+      () => {
+        this.autoFraming = true;
+      },
+    );
+  }
+
+  private startFlight(to: () => Framing, onArrive: () => void): void {
+    this.flight = {
+      from: { position: this.camera.position.clone(), target: this.controls.target.clone() },
+      to,
+      elapsed: 0,
+      onArrive,
+    };
+  }
+
+  /** One step of a flight: smoothstep from the start to a moving end. */
+  private fly(deltaSeconds: number): void {
+    const flight = this.flight;
+    if (!flight) {
+      return;
+    }
+    if (this.followingId) {
+      this.easeFollowPoint(deltaSeconds);
+    }
+    flight.elapsed += deltaSeconds;
+    const t = Math.min(1, flight.elapsed / FLIGHT_SECONDS);
+    const eased = t * t * (3 - 2 * t);
+    const to = flight.to();
+    this.camera.position.copy(flight.from.position).lerp(to.position, eased);
+    this.controls.target.copy(flight.from.target).lerp(to.target, eased);
+    if (t >= 1) {
+      this.flight = undefined;
+      flight.onArrive();
+    }
+  }
+
+  /** Eases the followed point towards the citizen, so hand-offs never jump. */
+  private easeFollowPoint(deltaSeconds: number): void {
+    const target = this.followingId ? this.world.followTarget(this.followingId) : undefined;
+    if (!target) {
+      return;
+    }
+    const wanted = new Vector3(
+      target.position.x,
+      groundHeight(target.position.x, target.position.z) + FOLLOW_LOOK_HEIGHT,
+      target.position.z,
+    );
+    this.followPoint.lerp(wanted, 1 - Math.exp(-deltaSeconds / FOLLOW_EASE_SECONDS));
+  }
+
+  /** Keeps the camera on the followed citizen, leaving the viewer their orbit. */
+  private trackFollowed(deltaSeconds: number): void {
+    this.easeFollowPoint(deltaSeconds);
+    const delta = this.followPoint.clone().sub(this.controls.target);
+    this.camera.position.add(delta);
+    this.controls.target.copy(this.followPoint);
+  }
 
   private readonly handleResize = (): void => {
     const wasPortrait = this.camera.aspect < 1;
@@ -423,7 +643,7 @@ export class App {
     this.camera.updateProjectionMatrix();
     // Turning the phone swaps the framing; a plain window resize leaves the
     // viewer's own camera alone.
-    if (wasPortrait !== this.camera.aspect < 1) {
+    if (wasPortrait !== this.camera.aspect < 1 && !this.followingId) {
       this.frameTown();
     }
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -431,8 +651,8 @@ export class App {
   };
 
   /**
-   * Temporary speed keys, in place until the real controls arrive in Phase 6:
-   * 1, 2, 3 and 4 for the four speeds, space to pause.
+   * Hidden power-user keys, not shown anywhere in the UI: 1, 2, 3 and 4 for
+   * the four speeds, space to pause, S, C and R for the weather.
    */
   private readonly handleKeyDown = (event: KeyboardEvent): void => {
     if (event.code === 'Space') {

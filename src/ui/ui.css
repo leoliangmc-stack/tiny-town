@@ -1,0 +1,341 @@
+/*
+ * The observation tools over the town (DESIGN.md §15): translucent, light,
+ * never in the way. Warm Ivory on the cards, Deep Gray for text, Sage for
+ * the active state and Warm Orange for the one action, Follow.
+ */
+
+.tt-ui {
+  --tt-ivory: rgba(245, 240, 230, 0.86);
+  --tt-ivory-solid: #f5f0e6;
+  --tt-gray: #3f403c;
+  --tt-gray-soft: rgba(63, 64, 60, 0.62);
+  --tt-sage: #8faf8f;
+  --tt-sage-soft: rgba(143, 175, 143, 0.35);
+  --tt-orange: #e6a15c;
+  --tt-radius: 10px;
+  --tt-shadow: 0 2px 10px rgba(40, 36, 30, 0.16);
+  --tt-safe-top: env(safe-area-inset-top, 0px);
+  --tt-safe-bottom: env(safe-area-inset-bottom, 0px);
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  color: var(--tt-gray);
+  font-size: 13px;
+  line-height: 1.35;
+  -webkit-font-smoothing: antialiased;
+}
+
+.tt-ui * {
+  box-sizing: border-box;
+}
+
+.tt-card {
+  position: absolute;
+  pointer-events: auto;
+  background: var(--tt-ivory);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border-radius: var(--tt-radius);
+  box-shadow: var(--tt-shadow);
+}
+
+.tt-ui button {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  border-radius: 8px;
+}
+
+.tt-ui button:focus-visible {
+  outline: 2px solid var(--tt-sage);
+  outline-offset: 2px;
+}
+
+.tt-glyph {
+  font-size: 15px;
+}
+
+.tt-active {
+  background: var(--tt-sage-soft);
+}
+
+/* --- Weather, top left ----------------------------------------------- */
+
+.tt-weather {
+  top: calc(12px + var(--tt-safe-top));
+  left: 12px;
+  display: flex;
+  gap: 2px;
+  padding: 4px;
+}
+
+.tt-weather-button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+}
+
+/* --- Town status, top right ------------------------------------------- */
+
+.tt-status-slot {
+  top: calc(12px + var(--tt-safe-top));
+  right: 12px;
+  width: 200px;
+  padding: 10px 14px 12px;
+}
+
+.tt-title {
+  margin: 0 0 6px;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.tt-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 2px 0;
+}
+
+.tt-row-wrap {
+  flex-direction: column;
+  gap: 1px;
+  padding: 5px 0;
+}
+
+.tt-label {
+  color: var(--tt-gray-soft);
+}
+
+.tt-value {
+  text-align: right;
+}
+
+.tt-row-wrap .tt-value {
+  text-align: left;
+}
+
+/* --- The selected citizen, right ------------------------------------ */
+
+.tt-citizen-slot {
+  top: calc(196px + var(--tt-safe-top));
+  right: 12px;
+  width: 240px;
+  padding: 12px 14px 14px;
+}
+
+.tt-citizen-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.tt-citizen-name {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 600;
+}
+
+.tt-citizen-meta {
+  margin: 0 0 6px;
+  color: var(--tt-gray-soft);
+}
+
+.tt-close {
+  width: 26px;
+  height: 26px;
+  line-height: 26px;
+  font-size: 18px;
+  color: var(--tt-gray-soft);
+}
+
+.tt-button {
+  margin-top: 10px;
+  padding: 8px 14px;
+  background: var(--tt-orange);
+  color: #fffaf2;
+  font-weight: 600;
+  box-shadow: 0 1px 4px rgba(40, 36, 30, 0.18);
+}
+
+.tt-button.tt-active {
+  background: var(--tt-gray);
+  color: var(--tt-ivory-solid);
+}
+
+/* --- Back to town ----------------------------------------------------- */
+
+.tt-return {
+  right: 12px;
+  bottom: calc(64px + var(--tt-safe-bottom));
+  padding: 6px 12px;
+  color: var(--tt-gray-soft);
+  background: rgba(245, 240, 230, 0.7);
+}
+
+/* --- Time bar, bottom ------------------------------------------------- */
+
+.tt-timebar {
+  left: 50%;
+  bottom: calc(12px + var(--tt-safe-bottom));
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px;
+}
+
+.tt-play {
+  width: 34px;
+  height: 30px;
+  font-size: 15px;
+}
+
+.tt-speed {
+  padding: 6px 10px;
+  min-width: 42px;
+}
+
+/* --- The sheet: hidden on a wide screen ------------------------------- */
+
+.tt-sheet {
+  display: none;
+}
+
+/* --- Portrait ---------------------------------------------------------- */
+
+.tt-portrait .tt-weather,
+.tt-portrait .tt-status-slot,
+.tt-portrait .tt-citizen-slot {
+  display: none;
+}
+
+.tt-capsule {
+  display: none;
+}
+
+.tt-portrait .tt-capsule {
+  display: flex;
+  align-items: center;
+  top: calc(10px + var(--tt-safe-top));
+  left: 10px;
+  padding: 7px 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.tt-portrait .tt-return {
+  top: calc(10px + var(--tt-safe-top));
+  right: 10px;
+  bottom: auto;
+}
+
+.tt-portrait .tt-timebar {
+  left: 0;
+  right: 0;
+  bottom: 0;
+  transform: none;
+  border-radius: 0;
+  justify-content: center;
+  padding: 4px 4px calc(4px + var(--tt-safe-bottom));
+  box-shadow: none;
+  background: var(--tt-ivory-solid);
+}
+
+.tt-portrait .tt-sheet {
+  display: flex;
+  flex-direction: column;
+  left: 0;
+  right: 0;
+  bottom: calc(38px + var(--tt-safe-bottom));
+  border-radius: var(--tt-radius) var(--tt-radius) 0 0;
+  height: 44px;
+  overflow: hidden;
+  transition: height 220ms ease;
+}
+
+.tt-portrait .tt-sheet[data-state='half'] {
+  height: 42vh;
+}
+
+.tt-portrait .tt-sheet[data-state='full'] {
+  height: 84vh;
+}
+
+.tt-handle {
+  flex: none;
+  height: 16px;
+  width: 100%;
+  position: relative;
+}
+
+.tt-handle::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 6px;
+  width: 36px;
+  height: 4px;
+  margin-left: -18px;
+  border-radius: 2px;
+  background: rgba(63, 64, 60, 0.28);
+}
+
+.tt-ticker {
+  flex: none;
+  height: 28px;
+  padding: 0 14px;
+  line-height: 28px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tt-sheet[data-state='half'] .tt-ticker,
+.tt-sheet[data-state='full'] .tt-ticker {
+  display: none;
+}
+
+.tt-sheet-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 4px 14px 14px;
+  -webkit-overflow-scrolling: touch;
+}
+
+.tt-sheet-body .tt-status {
+  margin-bottom: 10px;
+}
+
+.tt-sheet-body .tt-citizen {
+  margin-bottom: 10px;
+}
+
+.tt-log-title {
+  margin: 8px 0 4px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.tt-log {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.tt-log-entry {
+  display: flex;
+  gap: 10px;
+  padding: 3px 0;
+}
+
+.tt-log-when {
+  flex: none;
+  color: var(--tt-gray-soft);
+  font-variant-numeric: tabular-nums;
+}
