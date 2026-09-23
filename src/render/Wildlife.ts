@@ -49,6 +49,17 @@ const GULL_COUNT = 5;
 /** The speed from which the animals are hidden. */
 const HIDE_FROM_SPEED = 20;
 
+/**
+ * Body sizes as multiples of life size (SPEC.md 2.14, decision 31). The town
+ * is a miniature, and its people are already out of proportion so they read
+ * from the god view; the animals follow the same rule. Their gaits scale with
+ * them: a bigger rabbit hops further and higher, not more often.
+ */
+const RABBIT_SCALE = 3;
+const DEER_SCALE = 2.2;
+const BIRD_SCALE = 3.2;
+const GULL_SCALE = 1.9;
+
 const RABBIT_COLOR = 0x8d7b67;
 const DEER_COLOR = 0xa88a60;
 const WHITE = 0xf2f2ee;
@@ -389,7 +400,7 @@ export class Wildlife {
     rabbit.timer -= dt;
     if (rabbit.state === 'graze') {
       if (rabbit.timer <= 0) {
-        const distance = this.rng.nextFloat(3, 8);
+        const distance = this.rng.nextFloat(3, 8) * RABBIT_SCALE;
         const angle = rabbit.heading + this.rng.nextFloat(-1.6, 1.6);
         const targetX = rabbit.x + Math.cos(angle) * distance;
         const targetZ = rabbit.z + Math.sin(angle) * distance;
@@ -398,7 +409,7 @@ export class Wildlife {
         rabbit.heading = turn ? angle + Math.PI : angle;
         rabbit.targetX = turn ? rabbit.x - Math.cos(angle) * distance : targetX;
         rabbit.targetZ = turn ? rabbit.z - Math.sin(angle) * distance : targetZ;
-        rabbit.hopsLeft = Math.max(2, Math.round(distance / 1.1));
+        rabbit.hopsLeft = Math.max(2, Math.round(distance / (1.1 * RABBIT_SCALE)));
         rabbit.hopPhase = 0;
         rabbit.state = 'hop';
       }
@@ -406,7 +417,7 @@ export class Wildlife {
     }
     const hopSeconds = 0.42;
     rabbit.hopPhase += dt / hopSeconds;
-    const step = (1.1 / hopSeconds) * dt;
+    const step = ((1.1 * RABBIT_SCALE) / hopSeconds) * dt;
     rabbit.x += Math.cos(rabbit.heading) * step;
     rabbit.z += Math.sin(rabbit.heading) * step;
     if (rabbit.hopPhase >= 1) {
@@ -421,11 +432,13 @@ export class Wildlife {
 
   private drawRabbit(rabbit: Rabbit): void {
     const ground = groundHeight(rabbit.x, rabbit.z);
-    const hop = rabbit.state === 'hop' ? Math.sin(Math.PI * rabbit.hopPhase) * 0.32 : 0;
+    const hop =
+      rabbit.state === 'hop' ? Math.sin(Math.PI * rabbit.hopPhase) * 0.32 * RABBIT_SCALE : 0;
     // Nibbling: the head dips in a slow rhythm while grazing.
     const nibble = rabbit.state === 'graze' ? 0.04 * Math.max(0, Math.sin(this.time * 5)) : 0;
     const base = new Matrix4().makeRotationY(-rabbit.heading + Math.PI / 2);
     base.setPosition(rabbit.x, ground + hop, rabbit.z);
+    base.multiply(new Matrix4().makeScale(RABBIT_SCALE, RABBIT_SCALE, RABBIT_SCALE));
     const stretch = 1 + hop * 0.6;
 
     this.place(
@@ -467,7 +480,7 @@ export class Wildlife {
         deer.timer = this.rng.nextFloat(4, 9);
         return;
       }
-      const distance = this.rng.nextFloat(10, 24);
+      const distance = this.rng.nextFloat(10, 24) * DEER_SCALE;
       for (let attempt = 0; attempt < 8; attempt += 1) {
         const angle = this.rng.nextFloat(0, Math.PI * 2);
         const targetX = deer.x + Math.cos(angle) * distance;
@@ -489,7 +502,7 @@ export class Wildlife {
       return;
     }
     if (deer.state === 'walk') {
-      const speed = 1.1;
+      const speed = 1.1 * DEER_SCALE;
       const dx = deer.targetX - deer.x;
       const dz = deer.targetZ - deer.z;
       const remaining = Math.hypot(dx, dz);
@@ -510,6 +523,7 @@ export class Wildlife {
     const ground = groundHeight(deer.x, deer.z);
     const base = new Matrix4().makeRotationY(-deer.heading + Math.PI / 2);
     base.setPosition(deer.x, ground, deer.z);
+    base.multiply(new Matrix4().makeScale(DEER_SCALE, DEER_SCALE, DEER_SCALE));
     const walking = deer.state === 'walk';
     const swing = walking ? Math.sin(deer.stride) * 0.35 : 0;
 
@@ -598,7 +612,8 @@ export class Wildlife {
     const flap = climbing ? Math.sin(this.time * 19) * 0.75 : flying ? 0.12 : 0.4;
     const base = new Matrix4().makeRotationY(-bird.heading + Math.PI / 2);
     const hop = !flying ? 0.02 * Math.max(0, Math.sin(this.time * 3 + bird.perch.x)) : 0;
-    base.setPosition(bird.position.x, bird.position.y + 0.08 + hop, bird.position.z);
+    base.setPosition(bird.position.x, bird.position.y + 0.08 * BIRD_SCALE + hop, bird.position.z);
+    base.multiply(new Matrix4().makeScale(BIRD_SCALE, BIRD_SCALE, BIRD_SCALE));
     this.place('blob', base, { x: 0, y: 0, z: 0 }, { x: 0.1, y: 0.09, z: 0.17 }, bird.color);
     this.place('blob', base, { x: 0, y: 0.06, z: 0.15 }, 0.06, bird.color);
     this.drawWings(base, flying ? 0.24 : 0.14, 0.14, flap, bird.color);
@@ -709,6 +724,7 @@ export class Wildlife {
       base.multiply(new Matrix4().makeRotationZ(-0.25));
     }
     base.setPosition(gull.position.x, gull.position.y + 0.1, gull.position.z);
+    base.multiply(new Matrix4().makeScale(GULL_SCALE, GULL_SCALE, GULL_SCALE));
     this.place('blob', base, { x: 0, y: 0, z: 0 }, { x: 0.15, y: 0.12, z: 0.34 }, WHITE);
     this.place('blob', base, { x: 0, y: 0.05, z: 0.32 }, { x: 0.08, y: 0.07, z: 0.1 }, WHITE);
     this.drawWings(base, airborne ? 0.62 : 0.3, 0.17, flap, GULL_WING);
