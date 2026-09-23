@@ -78,13 +78,15 @@ const LAMP_EMISSIVE = 0xffc078;
  */
 const COLOR = {
   /** Dry ground: earth-yellow, with the park the one green place (DESIGN.md §9). */
-  ground: 0xbcac86,
+  ground: 0xb7a272,
   grass: 0x8fb07a,
   /** The meadows outside the town's shelf (DESIGN.md §9). */
   meadow: 0x7d9e5f,
   road: 0x77736b,
-  /** Pale stone for pavements, lanes and steps; the joints are painted white. */
-  pavement: 0xe2dbcd,
+  /** Pale cool stone for pavements, lanes and steps; the joints are painted white. */
+  pavement: 0xe6e7e3,
+  /** The painted kerb along every pavement and lane, so paving ends in a line. */
+  kerb: 0xf7f5ee,
   marking: 0xf1ebdf,
   parking: 0x84807a,
   parkPath: 0xd6c7ab,
@@ -149,6 +151,8 @@ const LAYER_ROAD = 0.02;
 const LAYER_ZONE = 0.05;
 const LAYER_MARKING = 0.08;
 const PAVEMENT_HEIGHT = 0.18;
+/** Width of the painted kerb line along pavements and lanes. */
+const KERB_LINE = 0.18;
 
 /** Sideways offset of a glow quad from its window, and its size against the pane. */
 const GLOW_OFFSET = 0.4;
@@ -442,7 +446,27 @@ export class TownView {
             y: PAVEMENT_HEIGHT,
             z: alongX ? kerbWidth : length + kerbWidth * 2,
           },
-          COLOR.pavement,
+          // The material carries the stone; tinting the instance too would
+          // square the colour and turn the pavement the colour of the earth.
+          0xffffff,
+        );
+        // A painted kerb where the pavement meets the ground.
+        const edge = side * (SIDEWALK_EDGE - KERB_LINE / 2);
+        const lineX = alongX ? middle : street.at + edge;
+        const lineZ = alongX ? street.at + edge : middle;
+        this.batch('box').place(
+          {
+            x: lineX,
+            y: groundHeight(lineX, lineZ) + PAVEMENT_HEIGHT + 0.015,
+            z: lineZ,
+          },
+          { x: groundTiltX(lineX, lineZ) },
+          {
+            x: alongX ? length + kerbWidth * 2 : KERB_LINE,
+            y: 0.03,
+            z: alongX ? KERB_LINE : length + kerbWidth * 2,
+          },
+          COLOR.kerb,
         );
       }
 
@@ -661,6 +685,16 @@ export class TownView {
         { x: groundTiltX(middle, lane.at) },
         { x: length, z: LANE_WIDTH },
       );
+      // A painted edge either side, so the lane reads as laid stone.
+      for (const side of [-1, 1]) {
+        const at = lane.at + side * (LANE_WIDTH / 2 - KERB_LINE / 2);
+        this.batch('box').place(
+          { x: middle, y: groundHeight(middle, at) + LAYER_ZONE + 0.02, z: at },
+          { x: groundTiltX(middle, at) },
+          { x: length, y: 0.03, z: KERB_LINE },
+          COLOR.kerb,
+        );
+      }
     }
 
     // The promenade's sea wall.
@@ -2130,7 +2164,7 @@ function stoneTexture(): DataTexture {
   const rowHeight = size / rows;
   const stoneShades: number[] = [];
   for (let i = 0; i < 64; i += 1) {
-    stoneShades.push(232 + Math.round(rng.nextFloat(-8, 8)));
+    stoneShades.push(214 + Math.round(rng.nextFloat(-12, 12)));
   }
   for (let y = 0; y < size; y += 1) {
     const row = Math.floor(y / rowHeight);
@@ -2140,11 +2174,11 @@ function stoneTexture(): DataTexture {
       const inRowJoint = y % rowHeight < 2;
       const inColumnJoint = (x + offset) % (rowHeight * 1.4) < 2;
       const joint = inRowJoint || inColumnJoint;
-      const shade = joint ? 250 : stoneShades[(row * 7 + column * 3) % stoneShades.length];
+      const shade = joint ? 255 : stoneShades[(row * 7 + column * 3) % stoneShades.length];
       const index = (y * size + x) * 4;
       data[index] = shade;
       data[index + 1] = shade;
-      data[index + 2] = joint ? 250 : shade - 6;
+      data[index + 2] = joint ? 255 : shade + 2;
       data[index + 3] = 255;
     }
   }

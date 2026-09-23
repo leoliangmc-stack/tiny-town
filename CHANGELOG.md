@@ -1,5 +1,22 @@
 # Changelog
 
+## Fix — paving that reads as paving
+
+The author asked why there were dirt tracks along the roads. There were none: the
+pavements were the colour of the earth.
+
+- Cause: the pavement kerb boxes are drawn through the stone material, whose colour is
+  already the pale stone, and each instance was tinted with the same colour again. The
+  tint is multiplied, so the pavements came out the square of the stone colour, a tan a
+  shade from the dry ground, and from above the pavement, the lane and the earth between
+  them fused into one earth-coloured band. The pedestrian lanes, drawn with a white
+  instance tint, were a little paler but still warm.
+- Fix: the kerb boxes take a white tint and let the material carry the stone; the stone
+  goes cooler and paler (near white, with the flagstones a light grey and the joints
+  pure white); the earth goes a touch more ochre; and a painted kerb line runs along the
+  earth side of every pavement and both sides of every lane, so paving ends in a line.
+  The tarmac stays its warm grey and now sits between two clear edges.
+
 ## Fix — props off the paving
 
 The author found lamps, plants and patches of light in the middle of the road.
