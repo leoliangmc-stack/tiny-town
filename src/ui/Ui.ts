@@ -43,6 +43,7 @@ export class Ui {
 
   private readonly weather: HTMLElement;
   private readonly weatherButtons = new Map<Weather, HTMLButtonElement>();
+  private readonly rainbowButton: HTMLButtonElement;
   private readonly lanternButton: HTMLButtonElement;
   private readonly capsule: HTMLButtonElement;
   private readonly capsuleText: HTMLElement;
@@ -84,10 +85,17 @@ export class Ui {
       button.type = 'button';
       button.innerHTML = `<span class="tt-glyph">${weatherGlyph(weather)}</span><span>${weather}</span>`;
       button.setAttribute('aria-label', weather);
-      button.addEventListener('click', () => this.app.world.setWeather(weather));
+      button.addEventListener('click', () => this.app.setWeather(weather));
       this.weatherButtons.set(weather, button);
       this.weather.appendChild(button);
     }
+    // The rainbow (SPEC.md 2.8): one press a rainbow, two a double, three none.
+    this.rainbowButton = element('button', 'tt-weather-button tt-rainbow') as HTMLButtonElement;
+    this.rainbowButton.type = 'button';
+    this.rainbowButton.innerHTML =
+      '<span class="tt-glyph">🌈<b class="tt-badge">2</b></span><span class="tt-rainbow-label">Rainbow</span>';
+    this.rainbowButton.addEventListener('click', () => this.app.cycleRainbow());
+    this.weather.appendChild(this.rainbowButton);
     // Mid-Autumn night (SPEC.md 2.15): a switch, set apart from the weather.
     this.weather.appendChild(element('span', 'tt-weather-divider'));
     this.lanternButton = element('button', 'tt-weather-button tt-lantern') as HTMLButtonElement;
@@ -106,7 +114,7 @@ export class Ui {
     this.capsule.append(this.capsuleText, this.capsuleGlyph);
     this.capsule.setAttribute('aria-label', 'Change the weather');
     this.capsule.addEventListener('click', () => {
-      this.app.world.setWeather(nextWeather(this.app.world.weather.current));
+      this.app.setWeather(nextWeather(this.app.world.weather.current));
     });
 
     // --- Town status ---
@@ -266,6 +274,12 @@ export class Ui {
         event.clientY,
         touch ? PICK_RADIUS_TOUCH : PICK_RADIUS_MOUSE,
       );
+      // On Mid-Autumn night a tap on the palace in the moon flies out to it.
+      if (id === undefined && this.app.pickPalace(event.clientX, event.clientY)) {
+        this.select(undefined);
+        this.app.visitPalace();
+        return;
+      }
       this.select(id);
     });
     canvas.addEventListener('pointercancel', () => {
@@ -358,8 +372,10 @@ export class Ui {
 
     const driving = world.vehicles.filter((vehicle) => vehicle.state === 'driving').length;
     const festival = this.app.midAutumn;
+    const rainbow = this.app.rainbowMode;
     const status = [
       festival,
+      rainbow,
       time.day,
       clock,
       world.citizens.length,
@@ -375,9 +391,29 @@ export class Ui {
       this.statusRows.get('Outside')!.textContent = String(world.citizenSystem.outsideCount);
       this.statusRows.get('Cars on the road')!.textContent = String(driving);
       this.statusRows.get('Weather')!.textContent =
-        `${weatherGlyph(weather)} ${weather}` + (festival ? ' · 🏮' : '');
+        `${weatherGlyph(weather)} ${weather}` +
+        (rainbow !== 'none' ? ' · 🌈' : '') +
+        (festival ? ' · 🏮' : '');
       this.capsuleText.textContent = `Day ${time.day} · ${clock} · `;
-      this.capsuleGlyph.textContent = weatherGlyph(weather) + (festival ? ' 🏮' : '');
+      this.capsuleGlyph.textContent =
+        weatherGlyph(weather) + (rainbow !== 'none' ? ' 🌈' : '') + (festival ? ' 🏮' : '');
+      this.rainbowButton.classList.toggle('tt-active', rainbow !== 'none');
+      this.rainbowButton.classList.toggle('tt-double', rainbow === 'double');
+      this.rainbowButton.setAttribute('aria-pressed', String(rainbow !== 'none'));
+      this.rainbowButton.setAttribute(
+        'aria-label',
+        rainbow === 'none' ? 'Rainbow' : rainbow === 'single' ? 'Double rainbow' : 'No rainbow',
+      );
+      this.rainbowButton.title =
+        rainbow === 'none'
+          ? 'Rainbow'
+          : rainbow === 'single'
+            ? 'Make it double'
+            : 'Clear the rainbow';
+      setText(
+        this.rainbowButton.querySelector<HTMLElement>('.tt-rainbow-label') ?? undefined,
+        rainbow === 'double' ? 'Double' : 'Rainbow',
+      );
       this.lanternButton.classList.toggle('tt-active', festival);
       this.lanternButton.setAttribute('aria-pressed', String(festival));
       for (const [which, button] of this.weatherButtons) {

@@ -89,6 +89,18 @@
   padding: 6px 10px;
 }
 
+.tt-badge {
+  display: none;
+  margin-left: 1px;
+  font-size: 9px;
+  font-weight: 700;
+  vertical-align: super;
+}
+
+.tt-double .tt-badge {
+  display: inline;
+}
+
 .tt-weather-divider {
   width: 1px;
   margin: 5px 3px;

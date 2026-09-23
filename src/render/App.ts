@@ -12,7 +12,7 @@ import {
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 
 import { isAboard, isOutside } from '../entities/Citizen.js';
-import { DEFAULT_SPEED, GAME_MINUTES_PER_TICK, type SpeedLevel } from '../simulation/constants.js';
+import { DEFAULT_SPEED, type SpeedLevel } from '../simulation/constants.js';
 import type { Weather } from '../simulation/WeatherSystem.js';
 import { TickScheduler } from '../simulation/TickScheduler.js';
 import { World } from '../simulation/World.js';
@@ -23,10 +23,12 @@ import { townBounds } from '../world/Town.js';
 import { Boats } from './Boats.js';
 import { CitizenView } from './CitizenView.js';
 import { DebugView } from './DebugView.js';
+import { Dragons } from './Dragons.js';
 import { Environment } from './Environment.js';
 import { Festival } from './Festival.js';
+import { MoonPalace } from './MoonPalace.js';
 import { Rain } from './Rain.js';
-import { Rainbow } from './Rainbow.js';
+import { Rainbow, type RainbowMode } from './Rainbow.js';
 import { SUNRISE_MINUTE, SUNSET_MINUTE } from './palettes.js';
 import { Scenery } from './Scenery.js';
 import { Smoke } from './Smoke.js';
@@ -145,6 +147,8 @@ const QUALITY_SAMPLE_FRAMES = 90;
 const QUALITY_SLOW_MS = 24;
 const FOLLOW_EASE_SECONDS = 0.22;
 const FLIGHT_SECONDS = 1.4;
+/** The flight out to the Moon Palace and back is a long one, so it takes longer. */
+const PALACE_FLIGHT_SECONDS = 3.2;
 const FOLLOW_LOOK_HEIGHT = 1.2;
 
 /** A camera framing: where the lens is and what it looks at. */
@@ -158,6 +162,7 @@ interface Flight {
   from: Framing;
   to: () => Framing;
   elapsed: number;
+  duration: number;
   /** What to do when the lens arrives. */
   onArrive: () => void;
 }
@@ -197,8 +202,11 @@ export class App {
   private readonly smoke: Smoke;
   private readonly rainbow = new Rainbow();
   private readonly festival = new Festival();
-  /** The weather last frame, to see the rain stop (SPEC.md 2.8). */
-  private lastWeather: Weather;
+  private readonly palace = new MoonPalace();
+  private readonly dragons = new Dragons();
+  /** The camera is out at the Moon Palace, looking at Chang'e (SPEC.md 2.15). */
+  private visitingPalace = false;
+  private readonly moonDisc = new Vector3();
   private readonly rain: Rain;
   private readonly citizenView: CitizenView;
   /** The eased picture of the weather: overcast, falling rain, wet ground. */
@@ -269,7 +277,8 @@ export class App {
     this.scene.add(this.smoke.mesh);
     this.scene.add(this.rainbow.root);
     this.scene.add(this.festival.root);
-    this.lastWeather = world.weather.current;
+    this.scene.add(this.palace.root);
+    this.scene.add(this.dragons.root);
     this.scene.add(this.citizenView.root);
     this.scene.add(this.vehicleView.root);
 
@@ -454,17 +463,49 @@ export class App {
   }
 
   /**
-   * Turns Mid-Autumn night on or off: at once dark, a full moon over the sea,
-   * every window lit, lanterns in the streets and fireworks on the beach.
+   * Turns Mid-Autumn night on or off: at once dark and clear, a full moon
+   * over the sea with the Moon Palace in it, every window lit, lanterns in
+   * the streets, fireworks over the beach and the town, and dragons in the
+   * sky (SPEC.md 2.15).
    */
   setMidAutumn(on: boolean): void {
     if (on === this.festival.isActive) {
       return;
     }
+    if (on) {
+      // Mid-Autumn night is always clear: the same as the viewer pressing Sunny.
+      this.world.setWeather('Sunny');
+      this.rainbow.clear();
+    } else if (this.visitingPalace) {
+      this.returnToTown();
+    }
     this.festival.setActive(on);
     this.townView.setFestival(on);
-    this.rainbow.clear();
-    this.environment.setFullMoon(on ? this.fullMoonDirection() : undefined);
+    this.palace.setVisible(on);
+    this.dragons.setVisible(on);
+    this.placeFestivalSky();
+  }
+
+  /** Hangs the full moon and puts the palace in front of it, for this framing. */
+  private placeFestivalSky(): void {
+    if (!this.festival.isActive) {
+      this.environment.setFullMoon(undefined);
+      return;
+    }
+    const direction = this.fullMoonDirection();
+    this.environment.setFullMoon(direction);
+    this.palace.place(CAMERA_TARGET, direction);
+  }
+
+  /**
+   * The viewer's weather choice (SPEC.md 2.8). Anything but a clear sky
+   * ends Mid-Autumn night first, since that night is always clear.
+   */
+  setWeather(weather: Weather): void {
+    if (weather !== 'Sunny') {
+      this.setMidAutumn(false);
+    }
+    this.world.setWeather(weather);
   }
 
   /**
@@ -487,28 +528,81 @@ export class App {
     return along.multiplyScalar(Math.cos(elevation)).setY(Math.sin(elevation));
   }
 
-  /** A rainbow may follow the rain, by day (SPEC.md 2.8). */
-  private watchForRainbow(weather: Weather): void {
-    const previous = this.lastWeather;
-    this.lastWeather = weather;
-    if (weather === 'Rain' || this.festival.isActive) {
-      this.rainbow.clear();
+  /**
+   * The 🌈 button (SPEC.md 2.8, decision 38): a rainbow, then a double, then
+   * none. A rainbow ends Mid-Autumn night first, which has none.
+   */
+  cycleRainbow(): RainbowMode {
+    this.setMidAutumn(false);
+    return this.rainbow.cycle(this.camera, this.controls.target);
+  }
+
+  /** Sets the rainbow outright, for tooling and screenshots. */
+  setRainbow(mode: RainbowMode): void {
+    if (mode !== 'none') {
+      this.setMidAutumn(false);
+    }
+    this.rainbow.setMode(mode, this.camera, this.controls.target);
+  }
+
+  get rainbowMode(): RainbowMode {
+    return this.rainbow.mode;
+  }
+
+  // --- The Moon Palace (SPEC.md 2.15) --------------------------------------
+
+  /** Whether a point on the screen lands on the Moon Palace or the moon behind it. */
+  pickPalace(clientX: number, clientY: number): boolean {
+    if (!this.festival.isActive || this.visitingPalace) {
+      return false;
+    }
+    const rect = this.renderer.domElement.getBoundingClientRect();
+    const toScreen = (point: Vector3): { x: number; y: number; z: number } => {
+      const projected = point.clone().project(this.camera);
+      return {
+        x: rect.left + ((projected.x + 1) / 2) * rect.width,
+        y: rect.top + ((1 - projected.y) / 2) * rect.height,
+        z: projected.z,
+      };
+    };
+    const centre = this.palace.centre;
+    const middle = toScreen(centre);
+    if (middle.z > 1) {
+      return false;
+    }
+    const right = new Vector3(1, 0, 0).applyQuaternion(this.camera.quaternion);
+    const edge = toScreen(centre.clone().addScaledVector(right, this.palace.radius));
+    const reach = Math.max(28, Math.hypot(edge.x - middle.x, edge.y - middle.y));
+    return Math.hypot(clientX - middle.x, clientY - middle.y) <= reach;
+  }
+
+  /** Flies out to the Moon Palace and stays with Chang'e until "back to town". */
+  visitPalace(): void {
+    if (!this.festival.isActive) {
       return;
     }
-    const minute = this.world.time.minuteOfDay;
-    const daytime = minute > SUNRISE_MINUTE + 20 && minute < SUNSET_MINUTE - 30;
-    if (previous === 'Rain' && daytime) {
-      this.rainbow.rainStopped(this.camera, this.controls.target);
-    }
+    this.followingId = undefined;
+    this.visitingPalace = true;
+    this.autoFraming = false;
+    this.controls.enablePan = false;
+    this.controls.minDistance = 4;
+    this.controls.maxDistance = 160;
+    this.startFlight(
+      () => ({ position: this.palace.changeViewpoint(), target: this.palace.changeFocus }),
+      () => undefined,
+      PALACE_FLIGHT_SECONDS,
+    );
   }
 
-  /** Stands a rainbow up now, for tooling and screenshots. */
-  showRainbow(double = false): void {
-    this.rainbow.show(this.camera, this.controls.target, double);
+  get atPalace(): boolean {
+    return this.visitingPalace;
   }
 
-  get rainbowState(): { active: boolean; double: boolean } {
-    return this.rainbow.state;
+  /** Keeps Chang'e in the middle of the picture as the cloud rides its swell. */
+  private trackPalace(): void {
+    const shift = this.palace.changeFocus.sub(this.controls.target);
+    this.controls.target.add(shift);
+    this.camera.position.add(shift);
   }
 
   getSpeed(): SpeedLevel {
@@ -561,6 +655,12 @@ export class App {
     this.wetness += (rainTarget - this.wetness) * (rainTarget > this.wetness ? ease : dryEase);
     this.environment.setWeather(this.cloudAmount, this.rainAmount);
     this.townView.setWetness(this.wetness);
+    if (this.festival.isActive) {
+      // The moon's disc is drawn behind the palace from wherever the camera is.
+      this.environment.setMoonDisc(
+        this.palace.moonDiscDirection(this.camera.position, this.moonDisc),
+      );
+    }
 
     // Real elapsed time drives clouds, swell and twinkle only; the
     // simulation never sees it (SPEC.md 2.14).
@@ -585,12 +685,13 @@ export class App {
     this.trafficLights.update(this.world, this.camera, this.environment.state.lampFactor);
     this.smoke.update(this.world, this.environment.state, deltaSeconds);
     this.festival.update(deltaSeconds, this.camera);
-    this.watchForRainbow(weather);
+    this.palace.update(deltaSeconds);
+    this.dragons.update(deltaSeconds);
     this.rainbow.update(
       deltaSeconds,
-      ticks * GAME_MINUTES_PER_TICK,
-      1 - this.rainAmount,
+      this.rainAmount,
       this.cloudAmount,
+      this.environment.state.daylight,
       this.camera,
     );
 
@@ -598,6 +699,8 @@ export class App {
 
     if (this.flight) {
       this.fly(deltaSeconds);
+    } else if (this.visitingPalace) {
+      this.trackPalace();
     } else if (this.followingId) {
       this.trackFollowed(deltaSeconds);
     } else if (this.autoFraming && !this.pointerDown) {
@@ -681,6 +784,7 @@ export class App {
       return;
     }
     this.followingId = citizenId;
+    this.visitingPalace = false;
     this.autoFraming = false;
     this.controls.enablePan = false;
     this.controls.minDistance = 8;
@@ -720,21 +824,25 @@ export class App {
    * flight rather than a cut: the "back to town" the SPEC promised.
    */
   returnToTown(): void {
+    const fromPalace = this.visitingPalace;
     this.followingId = undefined;
+    this.visitingPalace = false;
     this.controls.enablePan = true;
     this.startFlight(
       () => this.defaultFraming(),
       () => {
         this.autoFraming = true;
       },
+      fromPalace ? PALACE_FLIGHT_SECONDS : FLIGHT_SECONDS,
     );
   }
 
-  private startFlight(to: () => Framing, onArrive: () => void): void {
+  private startFlight(to: () => Framing, onArrive: () => void, duration = FLIGHT_SECONDS): void {
     this.flight = {
       from: { position: this.camera.position.clone(), target: this.controls.target.clone() },
       to,
       elapsed: 0,
+      duration,
       onArrive,
     };
   }
@@ -749,7 +857,7 @@ export class App {
       this.easeFollowPoint(deltaSeconds);
     }
     flight.elapsed += deltaSeconds;
-    const t = Math.min(1, flight.elapsed / FLIGHT_SECONDS);
+    const t = Math.min(1, flight.elapsed / flight.duration);
     const eased = t * t * (3 - 2 * t);
     const to = flight.to();
     this.camera.position.copy(flight.from.position).lerp(to.position, eased);
@@ -861,8 +969,9 @@ export class App {
     this.camera.updateProjectionMatrix();
     // Turning the phone swaps the framing; a plain window resize leaves the
     // viewer's own camera alone.
-    if (wasPortrait !== this.camera.aspect < 1 && !this.followingId) {
+    if (wasPortrait !== this.camera.aspect < 1 && !this.followingId && !this.visitingPalace) {
       this.frameTown();
+      this.placeFestivalSky();
     }
     this.renderer.setPixelRatio(
       Math.min(window.devicePixelRatio, QUALITY[this.qualityTier].pixelRatio),
@@ -872,7 +981,8 @@ export class App {
 
   /**
    * Hidden power-user keys, not shown anywhere in the UI: 1, 2, 3 and 4 for
-   * the four speeds, space to pause, S, C and R for the weather, Q to cycle
+   * the four speeds, space to pause, S, C and R for the weather, B for the
+   * rainbow, M for Mid-Autumn night, Q to cycle
    * the quality tier.
    */
   private readonly handleKeyDown = (event: KeyboardEvent): void => {
@@ -887,7 +997,10 @@ export class App {
     }
     const weather = WEATHER_KEYS[event.code];
     if (weather !== undefined) {
-      this.world.setWeather(weather);
+      this.setWeather(weather);
+    }
+    if (event.code === 'KeyB') {
+      this.cycleRainbow();
     }
     if (event.code === 'KeyM') {
       this.setMidAutumn(!this.midAutumn);
@@ -921,6 +1034,8 @@ export class App {
     this.smoke.dispose();
     this.rainbow.dispose();
     this.festival.dispose();
+    this.palace.dispose();
+    this.dragons.dispose();
     this.controls.dispose();
     this.renderer.dispose();
     this.renderer.domElement.remove();

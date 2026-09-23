@@ -8,28 +8,22 @@ import {
   type PerspectiveCamera,
 } from 'three';
 
-import { Rng } from '../simulation/Rng.js';
-
 /**
- * The rainbow after rain (SPEC.md 2.8, decision 36). When the viewer turns
- * the rain off by day, a rainbow usually stands over the sea, and now and
- * then a double one: a fainter secondary bow outside, its colours reversed.
+ * The rainbow button (SPEC.md 2.8, decision 38). One press stands a rainbow
+ * over the sea, a second makes it a double one (a fainter secondary bow
+ * outside, its colours reversed), a third takes it down. Rain is only rain:
+ * nothing here watches the weather to raise a bow by itself.
  *
- * It is pure render side. The dice are this module's own seeded generator,
- * never the world's, so the simulation and its hash cannot tell a rainbow
- * happened. It is placed once, when it appears, so that its top sits near
- * the top of the viewer's picture over the water, and it keeps turning to
- * face the camera.
+ * It is pure render side. It is placed when it first appears, so that its
+ * top sits near the top of the viewer's picture over the water, and it keeps
+ * turning to face the camera. Cloud, rain and night only make it fainter.
  */
 
-const RAINBOW_CHANCE = 0.85;
-const DOUBLE_CHANCE = 0.3;
+export type RainbowMode = 'none' | 'single' | 'double';
 
-/** How long it stands, in game minutes, but never less than this many real seconds. */
-const HOLD_GAME_MINUTES = 40;
-const HOLD_MIN_SECONDS = 12;
-/** Real seconds to fade out at the end. */
-const FADE_OUT_SECONDS = 5;
+/** Real seconds to fade in and out. */
+const FADE_IN_SECONDS = 2.5;
+const FADE_OUT_SECONDS = 1.5;
 
 /** How far out from the point the camera looks at the bow stands: over the sea. */
 const DISTANCE = 170;
@@ -40,6 +34,10 @@ const MIN_RADIUS = 50;
 const BAND = 0.075;
 /** The secondary bow's radius against the primary's: 51 over 42 degrees. */
 const SECONDARY_RATIO = 1.21;
+/** How much of the bow survives at night: a pale moonbow. */
+const NIGHT_STRENGTH = 0.35;
+/** How much survives while it pours. */
+const RAIN_STRENGTH = 0.6;
 
 const VERTEX_SHADER = /* glsl */ `
   varying vec2 vLocal;
@@ -89,16 +87,12 @@ const FRAGMENT_SHADER = /* glsl */ `
 export class Rainbow {
   readonly root = new Group();
 
-  private readonly rng = new Rng('rainbow');
   private readonly primary: Mesh<RingGeometry, ShaderMaterial>;
   private readonly secondary: Mesh<RingGeometry, ShaderMaterial>;
-  private double = false;
-  private active = false;
-  /** Game minutes and real seconds since it appeared. */
-  private gameMinutes = 0;
-  private seconds = 0;
-  /** Fade from 0 to 1 while it comes, then down again. */
-  private envelope = 0;
+  private current: RainbowMode = 'none';
+  /** Fade of each bow, from 0 to 1. */
+  private primaryFade = 0;
+  private secondaryFade = 0;
 
   constructor() {
     this.root.name = 'rainbow';
@@ -108,32 +102,36 @@ export class Rainbow {
     this.root.visible = false;
   }
 
-  /** Whether a rainbow is up right now, and whether it is a double. */
-  get state(): { active: boolean; double: boolean } {
-    return { active: this.active, double: this.double };
+  /** What the button has asked for: nothing, one bow or two. */
+  get mode(): RainbowMode {
+    return this.current;
   }
 
   /**
-   * The rain has just stopped. Roll for a rainbow; if one comes, stand it
-   * over the sea near the top of the picture. Returns whether one came.
+   * The button: none, then a rainbow, then a double, then none again. A new
+   * rainbow is stood where the viewer is looking; the double keeps it there.
    */
-  rainStopped(camera: PerspectiveCamera, target: Vector3): boolean {
-    if (this.rng.next() >= RAINBOW_CHANCE) {
-      return false;
-    }
-    this.double = this.rng.next() < DOUBLE_CHANCE;
-    this.show(camera, target);
-    return true;
+  cycle(camera: PerspectiveCamera, target: Vector3): RainbowMode {
+    const next = nextRainbowMode(this.current);
+    this.setMode(next, camera, target);
+    return next;
   }
 
-  /** Stands a rainbow up now, whatever the dice say. For tooling and screenshots. */
-  show(camera: PerspectiveCamera, target: Vector3, double = this.double): void {
-    this.double = double;
-    this.active = true;
-    this.gameMinutes = 0;
-    this.seconds = 0;
-    this.envelope = 0;
+  /** Sets the rainbow outright, for the button, tooling and screenshots. */
+  setMode(mode: RainbowMode, camera: PerspectiveCamera, target: Vector3): void {
+    if (this.current === 'none' && mode !== 'none') {
+      this.place(camera, target);
+    }
+    this.current = mode;
+  }
 
+  /** Takes it down: fades out from wherever it is. */
+  clear(): void {
+    this.current = 'none';
+  }
+
+  /** Stands the bows over the sea along the way the camera looks. */
+  private place(camera: PerspectiveCamera, target: Vector3): void {
     // Out along the way the camera looks, flattened onto the ground.
     const forward = target.clone().sub(camera.position).setY(0).normalize();
     const centre = target.clone().addScaledVector(forward, DISTANCE);
@@ -152,52 +150,41 @@ export class Rainbow {
       [this.secondary, SECONDARY_RATIO],
     ] as const) {
       bow.position.copy(centre);
-      const outer = radius * scale;
-      bow.scale.setScalar(outer);
+      bow.scale.setScalar(radius * scale);
       bow.material.uniforms.inner.value = 1 - BAND;
       bow.material.uniforms.outer.value = 1;
     }
-    this.secondary.visible = this.double;
-  }
-
-  /** Clears any rainbow at once: rain again, night, or the Mid-Autumn sky. */
-  clear(): void {
-    this.active = false;
-    this.envelope = 0;
-    this.root.visible = false;
   }
 
   /**
-   * Moves the rainbow on. `clearSky` is how far the rain has gone (0 while
-   * it pours, 1 when it has stopped), `cloud` how overcast it is.
+   * Moves the fades on. `rain` is how hard it is raining (0 to 1), `cloud`
+   * how overcast it is, and `daylight` 1 by day and 0 at night.
    */
   update(
     deltaSeconds: number,
-    gameMinutes: number,
-    clearSky: number,
+    rain: number,
     cloud: number,
+    daylight: number,
     camera: PerspectiveCamera,
   ): void {
-    if (!this.active) {
+    const approach = (value: number, wanted: number): number =>
+      wanted > value
+        ? Math.min(wanted, value + deltaSeconds / FADE_IN_SECONDS)
+        : Math.max(wanted, value - deltaSeconds / FADE_OUT_SECONDS);
+    this.primaryFade = approach(this.primaryFade, this.current === 'none' ? 0 : 1);
+    this.secondaryFade = approach(this.secondaryFade, this.current === 'double' ? 1 : 0);
+
+    const weather = (1 - (1 - RAIN_STRENGTH) * rain) * (1 - 0.45 * cloud);
+    const light = NIGHT_STRENGTH + (1 - NIGHT_STRENGTH) * daylight;
+    const strength = weather * light;
+    this.primary.material.uniforms.strength.value = this.primaryFade * strength * 0.55;
+    this.secondary.material.uniforms.strength.value = this.secondaryFade * strength * 0.26;
+    this.primary.visible = this.primaryFade > 0.002;
+    this.secondary.visible = this.secondaryFade > 0.002;
+    this.root.visible = this.primary.visible;
+    if (!this.root.visible) {
       return;
     }
-    this.seconds += deltaSeconds;
-    this.gameMinutes += gameMinutes;
-    const holding = this.gameMinutes < HOLD_GAME_MINUTES || this.seconds < HOLD_MIN_SECONDS;
-    if (holding) {
-      this.envelope = Math.min(1, this.envelope + deltaSeconds / 2.5);
-    } else {
-      this.envelope -= deltaSeconds / FADE_OUT_SECONDS;
-      if (this.envelope <= 0) {
-        this.clear();
-        return;
-      }
-    }
-
-    const strength = this.envelope * clearSky * (1 - 0.45 * cloud);
-    this.root.visible = strength > 0.005;
-    this.primary.material.uniforms.strength.value = strength * 0.55;
-    this.secondary.material.uniforms.strength.value = strength * 0.26;
 
     // Face the camera, turning about the vertical only.
     for (const bow of [this.primary, this.secondary]) {
@@ -215,6 +202,11 @@ export class Rainbow {
       bow.material.dispose();
     }
   }
+}
+
+/** What one press of the 🌈 button turns a rainbow into. */
+export function nextRainbowMode(mode: RainbowMode): RainbowMode {
+  return mode === 'none' ? 'single' : mode === 'single' ? 'double' : 'none';
 }
 
 /** A half ring of unit outer radius, standing upright in its XY plane. */

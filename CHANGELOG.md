@@ -1,5 +1,41 @@
 # Changelog
 
+## Phase 7.3 — Rainbow button and a bigger Mid-Autumn night
+
+SPEC decisions 38 and 39. The author changed their mind on the rainbow and asked for a
+fuller Mid-Autumn night.
+
+- Rain is only rain: turning it off no longer brings a rainbow (decision 36 is replaced).
+  A 🌈 button (key `B`) cycles a rainbow, a double rainbow and none; the rainbow stays up
+  until it is turned off, fainter in cloud, in rain and at night. The weather row shows it
+  active, with a small 2 when it is double; the status and the capsule show 🌈.
+- Mid-Autumn night is always clear: turning it on sets Sunny, and Cloudy, Rain or the
+  rainbow turn it off first. The weather buttons, the capsule and the keys all go through
+  `App.setWeather` for this.
+- Fireworks (`src/render/Fireworks.ts`, split out of `Festival.ts`): the beach launches
+  about three times as often, with salvos of three to five shells, and five kinds of
+  burst: peony, chrysanthemum with tails, gold willow, tilted ring and strobing crackle.
+  Small low shells go up from the bigger roofs, every third house, the square and the
+  park. One point cloud of up to 12,000 sparks with a free list; about 5,500 in the air on
+  average, 0.14 ms of script a frame.
+- The Moon Palace (`src/render/MoonPalace.ts`): white jade terraces, red pillars, green
+  glazed double roofs, two pavilions with galleries, lanterns and an osmanthus tree, on a
+  cloud 820 m out along the moon's direction. The sky dome is centred on the town, so the
+  moon's disc is drawn where the line from the camera through the palace meets the dome,
+  which keeps the palace in the moon from any camera; the light and the glint on the sea
+  keep the fixed moon, so shadows do not swing. A tap on the palace flies the camera out in
+  3.2 seconds to Chang'e on the cloud before the stairs, holding the Jade Rabbit, her
+  ribbon streaming; "Back to town" flies home.
+- Dragons (`src/render/Dragons.ts`): gold, red and jade, 44 m long, circling the town at
+  36 to 56 m on breathing loops, a wave running down each body, legs paddling, each
+  chasing a glowing pearl. The body is a tube rebuilt each frame from the head's path a
+  moment earlier; six draw calls a dragon.
+- `src/render/shapes.ts`: painted, merged primitives, a Chinese hip roof, and a material
+  that glows by its own vertex colour so the figures read at night without a lamp.
+- `tests/midautumn.test.ts`: the rainbow cycle, fireworks over both the beach and the
+  town within the pool, the moon lined up behind the palace from three cameras, and the
+  dragons staying above the rooftops.
+
 ## Phase 7.2 — v1 gaps, rainbows and Mid-Autumn night
 
 SPEC decisions 35 to 37.

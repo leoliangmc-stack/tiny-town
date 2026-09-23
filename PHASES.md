@@ -330,6 +330,34 @@ author asked for (SPEC decisions 35 to 37).
   portrait.
 - Tests, build and lint green; determinism untouched.
 
+## Phase 7.3 — Rainbow button and a bigger Mid-Autumn night
+
+**Goal.** The author changed their mind on the rainbow and asked for a fuller Mid-Autumn
+night (SPEC decisions 38 and 39).
+
+**Scope.**
+
+- Rain is only rain: no rainbow when it stops. A 🌈 button cycles a rainbow, a double
+  rainbow and none; it stays up until turned off, fainter in cloud, rain and at night.
+- Mid-Autumn night is always clear: turning it on sets Sunny; Cloudy, Rain or the rainbow
+  turn it off first.
+- Beach fireworks: more of them, salvos, and five burst kinds (peony, chrysanthemum,
+  willow, ring, crackle).
+- Town fireworks: small, low shells from rooftops, the square and the park.
+- The Moon Palace (Guanghan Palace) on a cloud in front of the full moon, kept in line with
+  the moon from any camera; a tap on it flies the camera in to Chang'e holding the Jade
+  Rabbit, and "Back to town" flies out.
+- Three dragons, gold, red and jade, circling over the town, each chasing a glowing pearl.
+- All render side, on real time, at every speed.
+
+**Acceptance.**
+
+- Turning the rain on and off never brings a rainbow; the 🌈 button always does.
+- Mid-Autumn night in the default view shows the palace in the moon, the dragons, and
+  fireworks both on the beach and over the town, landscape and portrait.
+- A tap on the palace shows Chang'e and the rabbit close up.
+- Tests, build and lint green; determinism untouched.
+
 ## v1.1 backlog (do not start before v1 ships)
 
 - Local persistence: save day/time/weather/speed; rebuild citizen positions from schedules on load; time frozen while away; Reset Town in a settings menu.

@@ -18,11 +18,11 @@ _A day at 20x, from dawn to dawn._
 - A Three.js renderer of a miniature Greek island village: white cubes on a slope, blue
   domes, a church and a lighthouse, olives and cypresses, a sea with a glint path, a sky
   with a sun, clouds, a Tekapo night of stars and a moon; boats on the water, traffic
-  lights, lit shop signs, chimney smoke, and a rainbow (sometimes a double) when the rain
-  stops by day.
-- Mid-Autumn night: the 🏮 button turns the picture to a full-moon night at once, every
-  window lit, red lanterns along the streets and fireworks over the beach. The simulation
-  carries on underneath, untouched.
+  lights, lit shop signs, chimney smoke, and a 🌈 button for a rainbow, then a double one.
+- Mid-Autumn night: the 🏮 button turns the picture to a clear full-moon night at once,
+  every window lit, red lanterns along the streets, fireworks over the beach and the town,
+  three dragons circling overhead, and the Moon Palace in the moon; tap it to fly in to
+  Chang'e and the Jade Rabbit. The simulation carries on underneath, untouched.
 - A restrained UI: weather, the town's status, a diary of causes ("Because of the rain,
   June and Sam gave up on the park and went to the cafe instead."), a citizen panel, and
   Follow.
@@ -41,7 +41,8 @@ npm run build     # typecheck and production build into dist/
 ```
 
 Hidden keys for power users: `1` `2` `3` `4` set the speed, space pauses, `S` `C` `R` set
-the weather, `M` toggles Mid-Autumn night, `Q` cycles the quality tier.
+the weather, `B` cycles the rainbow, `M` toggles Mid-Autumn night, `Q` cycles the quality
+tier.
 
 ## Architecture
 

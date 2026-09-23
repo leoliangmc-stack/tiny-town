@@ -24,7 +24,7 @@ import {
 } from './palettes.js';
 
 /** Radius of the sky dome. It sits outside everything else in the scene. */
-const SKY_RADIUS = 900;
+export const SKY_RADIUS = 900;
 
 /** How high the sun climbs at noon, in radians. A lower sun keeps shadows long. */
 const MAX_SUN_ELEVATION = (52 * Math.PI) / 180;
@@ -385,6 +385,8 @@ export interface EnvironmentState {
   lightColor: Color;
   /** How strongly the sea should glint under the light, 0 to 1. */
   glintStrength: number;
+  /** How much of the day's sun is up, 0 at night and 1 at noon. */
+  daylight: number;
   seaDeep: Color;
   seaShallow: Color;
   seaGlint: Color;
@@ -411,6 +413,13 @@ export class Environment {
   private rain = 0;
   /** Where the full moon hangs on Mid-Autumn night; undefined on any other. */
   private fullMoon: Vector3 | undefined;
+  /**
+   * Where the full moon's disc is drawn, if not at `fullMoon`: the Moon Palace
+   * keeps it lined up behind itself from wherever the camera is. The light
+   * and the glint on the sea keep to `fullMoon`, so shadows never swing
+   * as the camera turns.
+   */
+  private moonDisc: Vector3 | undefined;
 
   private readonly skyTop = new Color();
   private readonly skyHorizon = new Color();
@@ -426,6 +435,7 @@ export class Environment {
     lightDirection: new Vector3(0, 1, 0),
     lightColor: new Color(),
     glintStrength: 0,
+    daylight: 0,
     seaDeep: new Color(),
     seaShallow: new Color(),
     seaGlint: new Color(),
@@ -521,6 +531,16 @@ export class Environment {
    */
   setFullMoon(direction: Vector3 | undefined): void {
     this.fullMoon = direction?.clone().normalize();
+    this.moonDisc = undefined;
+  }
+
+  /** Draws the full moon's disc along this direction; undefined puts it back. */
+  setMoonDisc(direction: Vector3 | undefined): void {
+    if (!direction) {
+      this.moonDisc = undefined;
+      return;
+    }
+    this.moonDisc = (this.moonDisc ?? new Vector3()).copy(direction).normalize();
   }
 
   setFogRange(near: number, far: number): void {
@@ -606,7 +626,9 @@ export class Environment {
     uniforms.sunStrength.value = palette.sunStrength * (1 - 0.9 * cloud);
     uniforms.cloudCover.value = 0.45 + 0.7 * cloud;
     (uniforms.cloudLit.value as Color).lerp(uniforms.cloudShade.value as Color, cloud * 0.55);
-    (uniforms.moonDirection.value as Vector3).copy(moonDirection);
+    (uniforms.moonDirection.value as Vector3).copy(
+      this.fullMoon && this.moonDisc ? this.moonDisc : moonDirection,
+    );
     const full = this.fullMoon ? 1 : 0;
     uniforms.moonFull.value = full;
     uniforms.moonStrength.value = palette.moonStrength * (1 - 0.8 * cloud);
@@ -623,6 +645,7 @@ export class Environment {
     const moonlit = palette.moonStrength > palette.sunStrength;
     state.lightDirection.copy(moonlit ? moonDirection : sunDirection);
     state.lightColor.setHex(moonlit ? 0xc9d3ea : palette.sunColor);
+    state.daylight = Math.min(1, palette.sunStrength);
     state.glintStrength =
       (moonlit ? palette.moonStrength * 0.4 : palette.sunStrength) * (1 - cloud);
     state.seaDeep.setHex(palette.seaDeep);
