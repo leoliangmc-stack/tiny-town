@@ -237,3 +237,26 @@ export const TIME_PALETTES: readonly TimePalette[] = [
 /** When the sun comes up and goes down, which drives its direction. */
 export const SUNRISE_MINUTE = 5 * 60 + 40;
 export const SUNSET_MINUTE = 19 * 60 + 30;
+
+/** The lighthouse fades in over this many game minutes before sunset, and out after sunrise. */
+const BEACON_FADE_MINUTES = 20;
+
+/**
+ * How lit the lighthouse is, 0 to 1. Unlike the street lamps, which come on
+ * in the dusk while the sun is still up, a lighthouse only works in the dark:
+ * it is off from shortly after sunrise until shortly before sunset.
+ */
+export function beaconFactorAt(minuteOfDay: number): number {
+  const fadeOutEnd = SUNRISE_MINUTE + BEACON_FADE_MINUTES;
+  const fadeInStart = SUNSET_MINUTE - BEACON_FADE_MINUTES;
+  if (minuteOfDay < SUNRISE_MINUTE || minuteOfDay >= SUNSET_MINUTE) {
+    return 1;
+  }
+  if (minuteOfDay < fadeOutEnd) {
+    return 1 - (minuteOfDay - SUNRISE_MINUTE) / BEACON_FADE_MINUTES;
+  }
+  if (minuteOfDay >= fadeInStart) {
+    return (minuteOfDay - fadeInStart) / BEACON_FADE_MINUTES;
+  }
+  return 0;
+}

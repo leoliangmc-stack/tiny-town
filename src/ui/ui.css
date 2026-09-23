@@ -49,6 +49,16 @@
   border-radius: 8px;
 }
 
+/* The reset above must not strip a card's ground or the active highlight
+   from the buttons that are cards (the capsule, the return pill) or are active. */
+.tt-ui button.tt-card {
+  background: var(--tt-ivory);
+}
+
+.tt-ui button.tt-active {
+  background: var(--tt-sage-soft);
+}
+
 .tt-ui button:focus-visible {
   outline: 2px solid var(--tt-sage);
   outline-offset: 2px;
@@ -77,6 +87,13 @@
   align-items: center;
   gap: 6px;
   padding: 6px 10px;
+}
+
+.tt-weather-divider {
+  width: 1px;
+  margin: 5px 3px;
+  background: var(--tt-gray-soft);
+  opacity: 0.35;
 }
 
 /* --- Town status, top right ------------------------------------------- */
@@ -209,7 +226,6 @@
 
 /* --- Portrait ---------------------------------------------------------- */
 
-.tt-portrait .tt-weather,
 .tt-portrait .tt-status-slot,
 .tt-portrait .tt-citizen-slot {
   display: none;
@@ -226,6 +242,21 @@
   left: 10px;
   padding: 7px 12px;
   font-variant-numeric: tabular-nums;
+}
+
+/* In portrait the weather and the lantern are a row of glyphs under the capsule. */
+.tt-portrait .tt-weather {
+  top: calc(52px + var(--tt-safe-top));
+  left: 10px;
+  padding: 3px;
+}
+
+.tt-portrait .tt-weather-button {
+  padding: 6px 9px;
+}
+
+.tt-portrait .tt-weather-button span:not(.tt-glyph) {
+  display: none;
 }
 
 .tt-portrait .tt-return {

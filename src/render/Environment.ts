@@ -15,7 +15,13 @@ import {
 import { MINUTES_PER_GAME_DAY } from '../simulation/constants.js';
 import { Rng } from '../simulation/Rng.js';
 
-import { SUNRISE_MINUTE, SUNSET_MINUTE, TIME_PALETTES, type TimePalette } from './palettes.js';
+import {
+  beaconFactorAt,
+  SUNRISE_MINUTE,
+  SUNSET_MINUTE,
+  TIME_PALETTES,
+  type TimePalette,
+} from './palettes.js';
 
 /** Radius of the sky dome. It sits outside everything else in the scene. */
 const SKY_RADIUS = 900;
@@ -118,6 +124,7 @@ const SKY_FRAGMENT_SHADER = /* glsl */ `
   uniform float sunStrength;
   uniform vec3 moonDirection;
   uniform float moonStrength;
+  uniform float moonFull;
   uniform float starStrength;
   uniform vec3 cloudLit;
   uniform vec3 cloudShade;
@@ -311,22 +318,27 @@ const SKY_FRAGMENT_SHADER = /* glsl */ `
     // that stays well below the stars.
     if (moonStrength > 0.001) {
       float mc = dot(dir, moonDirection);
-      float moonDisc = disc(dir, moonDirection, 0.99955, 0.00004);
+      // The usual moon is a crescent; on Mid-Autumn night it is full,
+      // larger and warmer (SPEC.md 2.15).
+      float moonRadius = mix(0.03, 0.05, moonFull);
+      float moonDisc = disc(dir, moonDirection, 1.0 - moonRadius * moonRadius * 0.5, 0.00004 + 0.0001 * moonFull);
       vec3 moonT = normalize(cross(moonDirection, vec3(0.0, 1.0, 0.0)));
       vec3 moonB = cross(moonDirection, moonT);
       vec3 md = dir - moonDirection;
-      vec2 mp = vec2(dot(md, moonT), dot(md, moonB)) / 0.03;
+      vec2 mp = vec2(dot(md, moonT), dot(md, moonB)) / moonRadius;
       float r2 = dot(mp, mp);
       vec3 sphereNormal = vec3(mp, sqrt(max(0.0, 1.0 - r2)));
-      vec3 phaseLight = normalize(vec3(0.8, 0.2, 0.22));
+      vec3 phaseLight = normalize(mix(vec3(0.8, 0.2, 0.22), vec3(0.0, 0.0, 1.0), moonFull));
       float lambert = dot(sphereNormal, phaseLight);
       float maria = 0.72 + 0.28 * smoothstep(0.4, 0.62, fbm(mp * 3.2 + 3.0) * 0.7 + fbm(mp * 7.0 + 9.0) * 0.3);
       float limb = 0.8 + 0.2 * sphereNormal.z;
       float lit = 0.05 + 0.95 * smoothstep(-0.08, 0.4, lambert);
-      vec3 moonFace = vec3(0.93, 0.92, 0.86) * maria * limb * lit;
-      color += moonFace * moonDisc * moonStrength * 1.5;
+      vec3 moonFace = mix(vec3(0.93, 0.92, 0.86), vec3(1.0, 0.8, 0.5), moonFull) * maria * limb * lit;
+      // The full moon is kept below white so its gold survives tone mapping.
+      color += moonFace * moonDisc * moonStrength * mix(1.5, 1.05, moonFull);
       float halo = pow(max(mc, 0.0), 700.0) * 0.16 + pow(max(mc, 0.0), 140.0) * 0.04;
-      color += vec3(0.75, 0.8, 0.95) * halo * moonStrength;
+      halo += moonFull * (pow(max(mc, 0.0), 300.0) * 0.12 + pow(max(mc, 0.0), 40.0) * 0.035);
+      color += mix(vec3(0.75, 0.8, 0.95), vec3(1.0, 0.85, 0.6), moonFull) * halo * moonStrength;
     }
 
     // The sun: a hot disc and a wide soft halo, both in the palette's sun colour.
@@ -364,6 +376,8 @@ const SKY_FRAGMENT_SHADER = /* glsl */ `
 /** The state of the world's light at one moment, read by the rest of the renderer. */
 export interface EnvironmentState {
   lampFactor: number;
+  /** The lighthouse: on only in the dark, where the street lamps start at dusk. */
+  beaconFactor: number;
   windowFactor: number;
   /** Unit vector towards the sun by day, or the moon by night. */
   lightDirection: Vector3;
@@ -395,6 +409,8 @@ export class Environment {
   private fogFar = 340;
   private cloud = 0;
   private rain = 0;
+  /** Where the full moon hangs on Mid-Autumn night; undefined on any other. */
+  private fullMoon: Vector3 | undefined;
 
   private readonly skyTop = new Color();
   private readonly skyHorizon = new Color();
@@ -405,6 +421,7 @@ export class Environment {
 
   readonly state: EnvironmentState = {
     lampFactor: 0,
+    beaconFactor: 0,
     windowFactor: 0,
     lightDirection: new Vector3(0, 1, 0),
     lightColor: new Color(),
@@ -426,6 +443,7 @@ export class Environment {
         sunStrength: { value: 1 },
         moonDirection: { value: new Vector3(0, 1, 0) },
         moonStrength: { value: 0 },
+        moonFull: { value: 0 },
         starStrength: { value: 0 },
         cloudLit: { value: new Color(0xffffff) },
         cloudShade: { value: new Color(0xc2cfdd) },
@@ -497,6 +515,14 @@ export class Environment {
    * Sets where the haze starts and ends. The camera backs off further on a
    * narrow screen, so the range follows the framing rather than being fixed.
    */
+  /**
+   * Mid-Autumn night (SPEC.md 2.15): a full moon at the given direction, or
+   * back to the usual crescent on its usual path with undefined.
+   */
+  setFullMoon(direction: Vector3 | undefined): void {
+    this.fullMoon = direction?.clone().normalize();
+  }
+
   setFogRange(near: number, far: number): void {
     this.fogNear = near;
     this.fogFar = far;
@@ -571,7 +597,9 @@ export class Environment {
     );
 
     // The moon takes its own path through the night, opposite the sun's.
-    const moonDirection = directionFrom(moonAzimuth(minuteOfDay), MOON_ELEVATION);
+    const moonDirection = this.fullMoon
+      ? this.fullMoon.clone()
+      : directionFrom(moonAzimuth(minuteOfDay), MOON_ELEVATION);
 
     (uniforms.sunDirection.value as Vector3).copy(sunDirection);
     (uniforms.sunColor.value as Color).copy(this.sunColor);
@@ -579,14 +607,18 @@ export class Environment {
     uniforms.cloudCover.value = 0.45 + 0.7 * cloud;
     (uniforms.cloudLit.value as Color).lerp(uniforms.cloudShade.value as Color, cloud * 0.55);
     (uniforms.moonDirection.value as Vector3).copy(moonDirection);
+    const full = this.fullMoon ? 1 : 0;
+    uniforms.moonFull.value = full;
     uniforms.moonStrength.value = palette.moonStrength * (1 - 0.8 * cloud);
-    uniforms.starStrength.value = palette.starStrength * (1 - 0.85 * cloud);
+    // A full moon washes out the faintest stars.
+    uniforms.starStrength.value = palette.starStrength * (1 - 0.3 * full) * (1 - 0.85 * cloud);
     (uniforms.cloudLit.value as Color).setHex(palette.cloudLit);
     (uniforms.cloudShade.value as Color).setHex(palette.cloudShade);
     uniforms.time.value = elapsedSeconds;
 
     const state = this.state;
     state.lampFactor = palette.lampFactor;
+    state.beaconFactor = this.fullMoon ? 1 : beaconFactorAt(minuteOfDay);
     state.windowFactor = palette.windowFactor;
     const moonlit = palette.moonStrength > palette.sunStrength;
     state.lightDirection.copy(moonlit ? moonDirection : sunDirection);

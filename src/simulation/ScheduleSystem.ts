@@ -1,5 +1,5 @@
 import type { Appointment, Citizen, Job } from '../entities/Citizen.js';
-import { NIGHT_OUT_IDS } from '../world/Fleet.js';
+import { FLEET, NIGHT_OUT_IDS } from '../world/Fleet.js';
 import { CAFE_ID, HOUSES } from '../world/Town.js';
 
 import { Rng } from './Rng.js';
@@ -29,6 +29,29 @@ export function travelMinutes(routeLength: number, walkSpeed: number): number {
 }
 
 const minute = (hours: number, minutes = 0): number => hours * 60 + minutes;
+
+/** The citizens who drive the works vans, in fleet order. */
+const VAN_DRIVER_IDS: readonly string[] = FLEET.flatMap((vehicle) =>
+  vehicle.driverId ? [vehicle.driverId] : [],
+);
+
+/**
+ * When a van driver sets off on each round, before their stagger. The first
+ * leaves after the shift has surely started, none clashes with the lunch
+ * break, and the last is back before the earliest end of the shift.
+ */
+const VAN_ROUND_STARTS: readonly number[] = [
+  minute(8, 10),
+  minute(9, 10),
+  minute(10, 10),
+  minute(13, 0),
+  minute(14, 0),
+  minute(14, 40),
+];
+/** How far the second van runs behind the first. */
+const VAN_ROUND_STAGGER = 25;
+/** From leaving the yard to heading back from the house. */
+const VAN_ROUND_MINUTES = 35;
 
 /** The written day for a job, before jitter. */
 interface Template {
@@ -238,9 +261,10 @@ export class ScheduleSystem {
   }
 
   /**
-   * A delivery driver's rounds: two trips a day to a house, on foot until
-   * Phase 4 puts them in a van. They keep the streets busy mid-morning and
-   * mid-afternoon, when everybody else is indoors.
+   * A delivery driver's rounds. Those on foot make two a day, mid-morning and
+   * mid-afternoon. The two with a van go out about once an hour through the
+   * working day, around the lunch break, so there is always something on the
+   * road while everybody else is indoors (SPEC.md 2.5).
    */
   private planRounds(
     citizen: Citizen,
@@ -248,8 +272,27 @@ export class ScheduleSystem {
     workplace: { kind: 'building'; id: string },
     plan: Appointment[],
   ): void {
+    const vanIndex = VAN_DRIVER_IDS.indexOf(citizen.id);
+    if (vanIndex >= 0) {
+      // The vans take turns, so they are rarely both in the yard at once.
+      const offset = vanIndex * VAN_ROUND_STAGGER;
+      for (const start of VAN_ROUND_STARTS) {
+        const house = rng.pick(HOUSES);
+        const at = start + offset + rng.nextFloat(-4, 4);
+        plan.push({
+          at,
+          activity: 'Work',
+          place: { kind: 'building', id: house.id },
+          duration: 0,
+          note: `${citizen.name} set off on a delivery round to ${house.name}.`,
+        });
+        plan.push({ at: at + VAN_ROUND_MINUTES, activity: 'Work', place: workplace, duration: 0 });
+      }
+      return;
+    }
+
     // Each driver has their own slot within the hour, so the rounds are
-    // spread out rather than three vans leaving in the same eight minutes.
+    // spread out rather than three leaving in the same eight minutes.
     const slot = (hashText(citizen.id) % 4) * 18;
     for (const start of [minute(9, 0), minute(14, 0)]) {
       const house = rng.pick(HOUSES);

@@ -278,6 +278,58 @@ Companion to `SPEC.md` (the single source of truth for requirements) and `DESIGN
 - All SPEC 5.2 tests pass; SPEC 5.3 metrics green in CI.
 - The author's own 20× recording is good enough to post. If not, v1 is not done.
 
+## Phase 7.1 — Post-release fixes
+
+**Goal.** Three fixes from the author's look at the live demo, and boats on the sea (SPEC
+decisions 32 to 34).
+
+**Scope.**
+
+- The lighthouse works only in the dark: its lamp room, halo and beam follow their own
+  beacon factor (on from 20 minutes before sunset to 20 minutes after sunrise) rather than
+  the street lamps, and follow it quickly enough that 100x does not drag it into the morning.
+- Boats: two sailboats, a fishing boat and a distant ferry, render side, on real time,
+  bobbing, with a wake, and a small lamp at night.
+- Kerb parking out of the traffic lane: spaces half up on the kerb with a painted bay, parked
+  cars parallel to the street and facing the traffic; the driving lane moves in to make room.
+- The two vans go out about once an hour through the working day.
+
+**Acceptance.**
+
+- At noon at any speed, no part of the lighthouse glows.
+- Boats are visible on the sea in the default view by day and by night.
+- No parked car stands in a driving lane or across the street; vehicle tests stay green.
+- Cars are driving in every daytime hour from 08:00 to 16:00 except around the lunch break.
+
+## Phase 7.2 — v1 gaps, rainbows and Mid-Autumn night
+
+**Goal.** Close the v1 gaps found against the SPEC after release, and two additions the
+author asked for (SPEC decisions 35 to 37).
+
+**Scope.**
+
+- Traffic lights drawn: a post on each corner of the two signalled junctions, each head
+  showing red, amber or green from the phase the cars obey.
+- Sign lamps: a shop's sign glows at night while the building is lit.
+- Chimney smoke: the bakery while open; a white chimney on every third house, smoking
+  while somebody at home eats.
+- Street lamps warm up over the same few game minutes at any speed above 5x.
+- Doctors work at a clinic on the office's ground floor, marked by a green cross; the SPEC
+  is changed rather than a clinic built.
+- Rainbow after rain by day: about 85%, a third of them double; render side.
+- Mid-Autumn night: a 🏮 switch; dark at once, a full moon, every window lit, lanterns,
+  fireworks on the beach; render side, the simulation untouched.
+- Portrait: the weather and the lantern as a row of glyph buttons under the capsule.
+
+**Acceptance.**
+
+- Cars waiting at a junction wait at a visible red.
+- At 100x the street lamps are out by the middle of the morning.
+- Turning the rain off by day brings a rainbow most times.
+- Mid-Autumn night shows the full moon and fireworks in the default view, landscape and
+  portrait.
+- Tests, build and lint green; determinism untouched.
+
 ## v1.1 backlog (do not start before v1 ships)
 
 - Local persistence: save day/time/weather/speed; rebuild citizen positions from schedules on load; time frozen while away; Reset Town in a settings menu.

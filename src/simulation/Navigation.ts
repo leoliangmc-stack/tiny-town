@@ -10,6 +10,7 @@ import {
   SIDEWALK_OFFSET,
   STREETS,
   type Street,
+  getBuilding,
   getZone,
   junctions,
   kerbSpaceCount,
@@ -352,8 +353,12 @@ export function kerbNodeId(buildingId: string, index: number): string {
 /** Spacing of kerb spaces along the road, a car length and a bit. */
 const KERB_SPACE_SPACING = 5.6;
 
-/** How far in from the centreline a kerb space sits: on the near side, by the pavement. */
-const KERB_INSET = ROAD_WIDTH / 2 - 1.1;
+/**
+ * How far out from the centreline a kerb space sits: half up on the
+ * pavement, the way cars park on a narrow island street. A parked car then
+ * stands clear of the traffic lane and of the people on the pavement.
+ */
+export const KERB_INSET = ROAD_WIDTH / 2 - 0.2;
 
 /**
  * The parking nodes a trip to a place may end at, nearest first by index.
@@ -368,6 +373,27 @@ export function parkingNodesForPlace(place: Place): string[] {
   return Array.from({ length: kerbSpaceCount(buildingId) }, (_, index) =>
     kerbNodeId(buildingId, index),
   );
+}
+
+/**
+ * The way a car parked at a kerb space faces: along the street, with the kerb
+ * on its right, as traffic keeps to the right. Heading is measured from +Z
+ * towards +X, as for vehicles. Undefined for anything but a kerb space.
+ */
+export function kerbSpaceHeading(nodeId: string): number | undefined {
+  const match = /^kerb-(.+)-\d+$/.exec(nodeId);
+  if (!match) {
+    return undefined;
+  }
+  const id = match[1];
+  const front = id === 'park' ? PARK_FRONT : doorPosition(getBuilding(id));
+  const { street, onCentreline } = nearestStreet(front);
+  if (street.axis === 'x') {
+    // Facing +X the right hand side is +Z.
+    return front.z > onCentreline.z ? Math.PI / 2 : -Math.PI / 2;
+  }
+  // Facing +Z the right hand side is -X.
+  return front.x < onCentreline.x ? 0 : Math.PI;
 }
 
 /** The street a door is closest to, and the door's projection onto its centreline. */

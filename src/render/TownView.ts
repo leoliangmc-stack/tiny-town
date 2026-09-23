@@ -30,6 +30,7 @@ import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeom
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 
 import type { Building, HouseStyle } from '../entities/Building.js';
+import { buildRoadGraph, KERB_INSET, kerbSpaceHeading } from '../simulation/Navigation.js';
 import { Rng } from '../simulation/Rng.js';
 import type { World } from '../simulation/World.js';
 import { countryside, groundHeight, groundTiltX } from '../world/Terrain.js';
@@ -138,6 +139,10 @@ const PLINTH_LIP = 0.12;
 /** The lighthouse beam turns once in this many real seconds. */
 const BEAM_PERIOD_SECONDS = 6;
 const BEAM_LENGTH = 110;
+/** The clinic's cross by the office door. */
+const CLINIC_GREEN = 0x3f8f5a;
+/** How quickly, in real seconds, the lighthouse follows the dark. */
+const BEACON_EASE_SECONDS = 0.25;
 
 const ZONE_COLORS: Record<OutdoorZone['kind'], number> = {
   terrace: 0xd3c2a6,
@@ -169,6 +174,12 @@ interface BuildingLights {
   lit: number;
   /** What was last written to the instances, to skip unchanged frames. */
   written: number;
+}
+
+/** A chimney top smoke can rise from, and the building it belongs to. */
+export interface Chimney {
+  buildingId: string;
+  position: Vector3;
 }
 
 /** A glow quad that must face the camera: where it sits and how big it is. */
@@ -220,6 +231,14 @@ export class TownView {
   private readonly lampHaloBillboards: Billboard[] = [];
   private readonly lastCameraQuaternion = new Quaternion(0, 0, 0, 0);
   private lampLit = 0;
+  /** The lighthouse lamp, halo and beam: lit only in the dark. */
+  private readonly beaconMaterial: MeshStandardMaterial;
+  private readonly beaconHaloMaterial: MeshBasicMaterial;
+  private readonly beaconHaloBillboards: Billboard[] = [];
+  private beaconLit = 0;
+  /** Mid-Autumn night (SPEC.md 2.15): every window lit, whoever is home. */
+  private festival = false;
+  private readonly chimneyList: Chimney[] = [];
   private wet = 0;
 
   /** The lighthouse beam: the one light in the night that moves. */
@@ -259,6 +278,9 @@ export class TownView {
       depthWrite: false,
       opacity: 0,
     });
+
+    this.beaconMaterial = this.lampMaterial.clone();
+    this.beaconHaloMaterial = this.lampHaloMaterial.clone();
 
     this.beamMaterial = new MeshBasicMaterial({
       color: new Color(LAMP_EMISSIVE),
@@ -325,6 +347,8 @@ export class TownView {
     define('dome', new SphereGeometry(1, 18, 10, 0, Math.PI * 2, 0, Math.PI / 2), this.matteWhite);
     // The lamp room of the lighthouse and the lamp on the church dome.
     define('lampCylinder', new CylinderGeometry(1, 1, 1, 12), this.lampMaterial, {});
+    define('beaconCylinder', new CylinderGeometry(1, 1, 1, 12), this.beaconMaterial, {});
+    define('beaconHalo', new PlaneGeometry(1, 1), this.beaconHaloMaterial, {});
     define('cylinder', new CylinderGeometry(1, 1, 1, 10), this.matteWhite);
     define('sphere', new SphereGeometry(1, 8, 6), this.matteWhite);
     define('cone', new ConeGeometry(1, 1, 12), this.matteWhite);
@@ -451,6 +475,57 @@ export class TownView {
     }
 
     this.addZebraCrossings();
+    this.addParkingBays();
+  }
+
+  /**
+   * A painted bay at every kerb space: a line on the traffic side and a short
+   * tick at each end. A car parked in one reads as parked, not stopped in the
+   * road. The pavement half of the bay is left as it is.
+   */
+  private addParkingBays(): void {
+    const bayLength = 5.2;
+    const line = 0.18;
+    const inner = KERB_INSET - 1.15;
+    const edge = ROAD_WIDTH / 2;
+    const tick = edge - inner;
+    for (const node of buildRoadGraph().allNodes) {
+      const heading = kerbSpaceHeading(node.id);
+      if (heading === undefined) {
+        continue;
+      }
+      const alongX = Math.abs(Math.sin(heading)) > 0.5;
+      const { x, z } = node.position;
+      // Which way the road centre lies from the space.
+      const inward = alongX ? -Math.sign(Math.sin(heading)) : Math.sign(Math.cos(heading));
+      const offset = inward * (KERB_INSET - inner);
+      const tickOffset = inward * (KERB_INSET - (inner + edge) / 2);
+      if (alongX) {
+        this.slab(x, z + offset, bayLength, line, LAYER_MARKING, COLOR.marking);
+        for (const end of [-1, 1]) {
+          this.slab(
+            x + (end * bayLength) / 2,
+            z + tickOffset,
+            line,
+            tick,
+            LAYER_MARKING,
+            COLOR.marking,
+          );
+        }
+      } else {
+        this.slab(x + offset, z, line, bayLength, LAYER_MARKING, COLOR.marking);
+        for (const end of [-1, 1]) {
+          this.slab(
+            x + tickOffset,
+            z + (end * bayLength) / 2,
+            tick,
+            line,
+            LAYER_MARKING,
+            COLOR.marking,
+          );
+        }
+      }
+    }
   }
 
   /**
@@ -1053,7 +1128,7 @@ export class TownView {
       this.addWindow(frame, at, placement, theme, style !== undefined, lights);
     }
 
-    this.addDoorAndFront(at, building, volumes[0], theme);
+    this.addDoorAndFront(at, building, volumes[0], theme, lights);
     if (style) {
       this.addHouseRoof(at, building, style, volumes);
       this.addYard(frame, at, building, style, volumes[0]);
@@ -1188,7 +1263,13 @@ export class TownView {
    * The door in the front wall, with its step; and on a shop the awning and
    * the sign in the theme colour that make it a shop (DESIGN.md §4).
    */
-  private addDoorAndFront(at: At, building: Building, ground: Volume, theme: number): void {
+  private addDoorAndFront(
+    at: At,
+    building: Building,
+    ground: Volume,
+    theme: number,
+    lights: BuildingLights,
+  ): void {
     const doorHeight = 2.2;
     const shop = building.kind !== 'house';
     const doorWidth = shop ? 2 : 1.2;
@@ -1241,6 +1322,67 @@ export class TownView {
       at({ x: 0, y: signY, z: front + 0.14 }, { x: building.width * 0.36, y: 0.46, z: 0.08 }),
       COLOR.ivory,
     );
+
+    // The sign lamp (SPEC.md 2.6): a small hood over the board, and a warm
+    // glow that comes on with the building's windows, so a lit sign at
+    // night says somebody is in.
+    this.batch('box').add(
+      at({ x: 0, y: signY + 0.5, z: front + 0.32 }, { x: building.width * 0.3, y: 0.08, z: 0.5 }),
+      COLOR.ironwork,
+    );
+    const signGlow = new Vector3().setFromMatrixPosition(
+      at({ x: 0, y: signY + 0.05, z: front + 0.6 }, 1),
+    );
+    const signGlowScale = Math.max(3, building.width * 0.55);
+    lights.glowIndices.push(
+      this.batch('windowGlow').add(composeMatrix(signGlow, {}, signGlowScale), new Color(0, 0, 0)),
+    );
+    this.windowGlowBillboards.push({ position: signGlow, scale: signGlowScale });
+
+    // The doctors see patients on the office's ground floor (SPEC.md 2.4):
+    // a green cross by the door says so.
+    if (building.kind === 'office') {
+      const crossX = doorWidth / 2 + 0.9;
+      const crossY = ground.base + 1.9;
+      this.batch('box').add(
+        at({ x: crossX, y: crossY, z: front + 0.08 }, { x: 0.78, y: 0.78, z: 0.06 }),
+        COLOR.ivory,
+      );
+      for (const [w, h] of [
+        [0.56, 0.17],
+        [0.17, 0.56],
+      ]) {
+        this.batch('box').add(
+          at({ x: crossX, y: crossY, z: front + 0.13 }, { x: w, y: h, z: 0.05 }),
+          CLINIC_GREEN,
+        );
+      }
+    }
+  }
+
+  /**
+   * A white Cycladic chimney on a roof: a squat column, a slab cap and a
+   * little hat. Smoke rises from its top (SPEC.md 2.6); see Smoke.ts.
+   */
+  private addChimney(at: At, buildingId: string, x: number, roofY: number, z: number): void {
+    const box = this.batch('box');
+    box.add(at({ x, y: roofY + 0.5, z }, { x: 0.55, y: 1, z: 0.55 }), WALL_WHITE);
+    box.add(at({ x, y: roofY + 1.05, z }, { x: 0.8, y: 0.1, z: 0.8 }), WALL_WHITE);
+    box.add(at({ x, y: roofY + 1.25, z }, { x: 0.4, y: 0.3, z: 0.4 }), WALL_WHITE);
+    this.chimneyList.push({
+      buildingId,
+      position: new Vector3().setFromMatrixPosition(at({ x, y: roofY + 1.45, z }, 1)),
+    });
+  }
+
+  /** Every chimney in town, for the smoke. */
+  get chimneys(): readonly Chimney[] {
+    return this.chimneyList;
+  }
+
+  /** Mid-Autumn night: every window lit while it lasts (SPEC.md 2.15). */
+  setFestival(on: boolean): void {
+    this.festival = on;
   }
 
   /**
@@ -1260,6 +1402,17 @@ export class TownView {
         COLOR.ivory,
       );
       this.batch('dome').add(at({ x: top.x, y: y + 0.52, z: top.z }, 1.05), COLOR.dome);
+    }
+
+    // A chimney on every third house, at the back corner of the top storey.
+    if (building.kind === 'house' && Number(building.id.slice(-2)) % 3 === 1) {
+      this.addChimney(
+        at,
+        building.id,
+        top.x + top.width * 0.3,
+        top.base + top.height,
+        top.z - top.depth * 0.3,
+      );
     }
 
     // The terrace: the part of the ground roof the upper storey leaves free.
@@ -1366,6 +1519,10 @@ export class TownView {
   /** Equipment on a shop's roof: air conditioning, a vent, a tank. */
   private addShopRoof(at: At, building: Building, volume: Volume): void {
     const top = volume.base + volume.height + 0.06;
+    if (building.kind === 'bakery') {
+      // The oven's flue.
+      this.addChimney(at, building.id, -building.width * 0.36, top, -building.depth * 0.34);
+    }
     const rounded = this.batch('roundedBox');
     const cylinder = this.batch('cylinder');
     const units = building.kind === 'office' ? 3 : 2;
@@ -1702,11 +1859,11 @@ export class TownView {
     const galleryY = ground + 1.2 + height;
     cylinder.place({ x, y: galleryY, z }, {}, { x: 2.2, y: 0.3, z: 2.2 }, COLOR.ironwork);
     const lampY = galleryY + 1.05;
-    this.batch('lampCylinder').place({ x, y: lampY, z }, {}, { x: 1.05, y: 1.5, z: 1.05 });
+    this.batch('beaconCylinder').place({ x, y: lampY, z }, {}, { x: 1.05, y: 1.5, z: 1.05 });
     this.batch('cone').place({ x, y: lampY + 1.2, z }, {}, { x: 1.3, y: 0.9, z: 1.3 }, 0xc0473c);
     const halo = new Vector3(x, lampY, z);
-    this.batch('lampHalo').add(composeMatrix(halo, {}, 9));
-    this.lampHaloBillboards.push({ position: halo, scale: 9 });
+    this.batch('beaconHalo').add(composeMatrix(halo, {}, 9));
+    this.beaconHaloBillboards.push({ position: halo, scale: 9 });
 
     this.beam.position.set(x, lampY, z);
     this.root.add(this.beam);
@@ -1885,6 +2042,7 @@ export class TownView {
     deltaSeconds: number,
     elapsedSeconds: number,
     camera: Camera,
+    speed = 1,
   ): void {
     const ease = 1 - Math.exp(-deltaSeconds / LIGHT_FADE_SECONDS);
     const panes = this.batch('windowPane').built;
@@ -1895,7 +2053,7 @@ export class TownView {
     let windowsChanged = false;
 
     for (const lights of this.buildingLights) {
-      const target = world.isLit(lights.building.id) ? 1 : 0;
+      const target = this.festival || world.isLit(lights.building.id) ? 1 : 0;
       lights.lit += (target - lights.lit) * ease;
 
       const shown = lights.lit * environment.windowFactor;
@@ -1921,7 +2079,11 @@ export class TownView {
       glows.instanceColor.needsUpdate = true;
     }
 
-    const lampEase = 1 - Math.exp(-deltaSeconds / LAMP_WARM_SECONDS);
+    // The warm-up is 2.2 real seconds at 5x and below; faster, it shortens
+    // with the speed, so it spans the same few game minutes and the lamps do
+    // not burn on into the morning at 100x (SPEC.md 2.7).
+    const warmSeconds = LAMP_WARM_SECONDS / Math.max(1, speed / 5);
+    const lampEase = 1 - Math.exp(-deltaSeconds / warmSeconds);
     this.lampLit += (environment.lampFactor - this.lampLit) * lampEase;
     // A flicker while warming up, gone once the lamp is fully on or off.
     const warming = Math.min(this.lampLit, 1 - this.lampLit) * 4;
@@ -1931,9 +2093,15 @@ export class TownView {
     this.lampPoolMaterial.opacity = this.lampLit * (0.3 + 0.25 * this.wet);
     this.lampHaloMaterial.opacity = this.lampLit * 0.36;
 
+    // The lighthouse follows the dark closely: a quick real time ease, so at
+    // 100x it does not linger into the morning the way a slow fade would.
+    const beaconEase = 1 - Math.exp(-deltaSeconds / BEACON_EASE_SECONDS);
+    this.beaconLit += (environment.beaconFactor - this.beaconLit) * beaconEase;
+    this.beaconMaterial.emissiveIntensity = this.beaconLit * 1.5;
+    this.beaconHaloMaterial.opacity = this.beaconLit * 0.36;
     // The beam sweeps on real time: at 20x the town sees a slow pulse.
-    this.beamMaterial.opacity = this.lampLit * 0.22;
-    this.beam.visible = this.lampLit > 0.01;
+    this.beamMaterial.opacity = this.beaconLit * 0.22;
+    this.beam.visible = this.beaconLit > 0.01;
     this.beam.rotation.y = (elapsedSeconds * Math.PI * 2) / BEAM_PERIOD_SECONDS;
 
     this.faceCamera(camera);
@@ -1959,6 +2127,7 @@ export class TownView {
 
     turn(this.batch('windowGlow').built, this.windowGlowBillboards);
     turn(this.batch('lampHalo').built, this.lampHaloBillboards);
+    turn(this.batch('beaconHalo').built, this.beaconHaloBillboards);
   }
 }
 

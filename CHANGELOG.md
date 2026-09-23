@@ -1,5 +1,63 @@
 # Changelog
 
+## Phase 7.2 — v1 gaps, rainbows and Mid-Autumn night
+
+SPEC decisions 35 to 37.
+
+- Traffic lights (`src/render/TrafficLights.ts`): four posts at each of the two signalled
+  junctions, each head facing the traffic that keeps right on the way in, showing red,
+  amber for the last quarter minute of a green, or green, from `VehicleSystem.isGreen`.
+  The lit lamp carries a glow that grows at night.
+- Sign lamps: every shop and public building has a small hood over its sign and a warm
+  glow that follows the building's windows.
+- Chimney smoke (`src/render/Smoke.ts`): a white Cycladic chimney on every third house
+  and the bakery's flue, 11 in all. Puffs rise, drift and thin out while somebody at home
+  is eating, or while the bakery is open. One instanced draw call with per-puff opacity.
+- Street lamps warm up over 2.2 real seconds up to 5x and proportionally faster above, so
+  at 100x they no longer burn on into the morning.
+- The clinic: the SPEC now says doctors work on the office's ground floor, and a green
+  cross hangs by the office door. No new building.
+- Rainbow (`src/render/Rainbow.ts`): turning the rain off by day brings one 85% of the
+  time, 30% of those double, the secondary fainter with its colours reversed. It stands
+  over the sea with its top near the top of the picture, fades in as the rain clears,
+  holds 40 game minutes or 12 real seconds, whichever is longer, and fades out. Its own
+  seeded dice; the simulation never knows.
+- Mid-Autumn night (`src/render/Festival.ts`, 🏮 button, key `M`): the picture jumps to a
+  fixed 21:30 whatever the clock says; a full moon, larger and warmer than the crescent,
+  hangs half way up the sky the night framing shows; every window lights; 188 red
+  lanterns hang from the street lamps and in strings between them; fireworks go up from
+  the sand and burst in gold, red, pink, green and blue-white. The simulation runs on
+  underneath, so the clock in the corner keeps its own time; the status and the capsule
+  show 🏮.
+- Portrait: the weather buttons and the lantern now show as a row of glyphs under the
+  capsule; before, the weather could only be cycled by tapping the capsule.
+- A stylesheet fix: `.tt-ui button` reset the background of buttons that are cards (the
+  capsule, the return pill) and of active buttons, so the capsule had no card behind it
+  and the active weather and speed were never highlighted. Both show now.
+
+## Phase 7.1 — Post-release fixes
+
+Three fixes from the author's look at the live demo, and boats (SPEC decisions 32 to 34).
+
+- The lighthouse only works in the dark. Its lamp room, halo and beam used to share the
+  street lamps' factor, which comes on in the dusk an hour and a half before sunset and
+  eases on 2.2 real seconds, so at 100x the beam swept on into mid-morning. It now has
+  its own beacon factor, on from 20 minutes before sunset to 20 minutes after sunrise,
+  followed on a 0.25 s ease. At 100x it is out by 06:32 and lit by 19:59.
+- Boats (`src/render/Boats.ts`): two sailboats circling inshore, a fishing boat running
+  along the coast and a ferry crossing far out, its ends in the haze. Hull, cabin, mast,
+  sails, a pale wake and a small lamp at night; bob, roll and a sailboat's heel. Real
+  time, render side, visible at every speed, six draw calls.
+- Parked cars no longer stand in the traffic. Kerb spaces move out to half up on the
+  pavement (3.3 m from the centreline, was 2.4) with a painted bay, the driving lane moves
+  in (1.2 m, was 1.7), and a car that parks at the kerb straightens up along the street
+  with the kerb on its right. Before, a parked car sat in the lane at whatever angle it
+  drove in, and at the start of the day every car faced north across its street.
+- The two vans go out about once an hour between 08:10 and 15:20, around the lunch
+  break, the second 25 minutes behind the first; the drivers on foot keep their two
+  rounds. Over three days the vans made 63 trips, was 17, and cars are on the road in
+  every hour from 07:00 to 21:00.
+
 ## Phase 7 — Performance, polish and release
 
 The last v1 phase (PHASES.md Phase 7), with three small fixes from the Phase 6 review.

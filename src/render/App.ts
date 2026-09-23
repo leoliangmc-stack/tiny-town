@@ -12,7 +12,7 @@ import {
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 
 import { isAboard, isOutside } from '../entities/Citizen.js';
-import { DEFAULT_SPEED, type SpeedLevel } from '../simulation/constants.js';
+import { DEFAULT_SPEED, GAME_MINUTES_PER_TICK, type SpeedLevel } from '../simulation/constants.js';
 import type { Weather } from '../simulation/WeatherSystem.js';
 import { TickScheduler } from '../simulation/TickScheduler.js';
 import { World } from '../simulation/World.js';
@@ -20,13 +20,18 @@ import { World } from '../simulation/World.js';
 import { groundHeight, TOWN_RISE } from '../world/Terrain.js';
 import { townBounds } from '../world/Town.js';
 
+import { Boats } from './Boats.js';
 import { CitizenView } from './CitizenView.js';
 import { DebugView } from './DebugView.js';
 import { Environment } from './Environment.js';
+import { Festival } from './Festival.js';
 import { Rain } from './Rain.js';
+import { Rainbow } from './Rainbow.js';
 import { SUNRISE_MINUTE, SUNSET_MINUTE } from './palettes.js';
 import { Scenery } from './Scenery.js';
+import { Smoke } from './Smoke.js';
 import { TownView } from './TownView.js';
+import { TrafficLights } from './TrafficLights.js';
 import { VehicleView } from './VehicleView.js';
 import { Wildlife } from './Wildlife.js';
 
@@ -104,6 +109,9 @@ const WEATHER_KEYS: Record<string, Weather> = {
 /** How overcast each weather looks, and how long the picture takes to get there. */
 const CLOUD_AMOUNT: Record<Weather, number> = { Sunny: 0, Cloudy: 0.7, Rain: 1 };
 const WEATHER_EASE_SECONDS = 1.6;
+
+/** The hour Mid-Autumn night shows, whatever the clock says (SPEC.md 2.15). */
+const FESTIVAL_MINUTE = 21 * 60 + 30;
 const DRY_OUT_SECONDS = 6;
 
 /**
@@ -184,6 +192,13 @@ export class App {
   private readonly scenery = new Scenery();
   private readonly townView = new TownView();
   private readonly wildlife = new Wildlife();
+  private readonly boats = new Boats();
+  private readonly trafficLights = new TrafficLights();
+  private readonly smoke: Smoke;
+  private readonly rainbow = new Rainbow();
+  private readonly festival = new Festival();
+  /** The weather last frame, to see the rain stop (SPEC.md 2.8). */
+  private lastWeather: Weather;
   private readonly rain: Rain;
   private readonly citizenView: CitizenView;
   /** The eased picture of the weather: overcast, falling rain, wet ground. */
@@ -248,6 +263,13 @@ export class App {
     this.scene.add(this.scenery.root);
     this.scene.add(this.townView.root);
     this.scene.add(this.wildlife.root);
+    this.scene.add(this.boats.root);
+    this.scene.add(this.trafficLights.root);
+    this.smoke = new Smoke(this.townView.chimneys);
+    this.scene.add(this.smoke.mesh);
+    this.scene.add(this.rainbow.root);
+    this.scene.add(this.festival.root);
+    this.lastWeather = world.weather.current;
     this.scene.add(this.citizenView.root);
     this.scene.add(this.vehicleView.root);
 
@@ -335,7 +357,7 @@ export class App {
     }
 
     const yaw = MathUtils.degToRad(view.yawDegrees);
-    const night = nightAmount(this.world.time.minuteOfDay);
+    const night = nightAmount(this.shownMinute());
     const pitch = MathUtils.degToRad(
       view.pitchDegrees + (view.nightPitchDegrees - view.pitchDegrees) * night,
     );
@@ -417,6 +439,78 @@ export class App {
     return this.container.clientWidth / height;
   }
 
+  /**
+   * The hour the picture shows: the game clock, except on Mid-Autumn night,
+   * when the sky stays at a fixed evening whatever the clock says (SPEC.md
+   * 2.15). The simulation never sees this.
+   */
+  private shownMinute(): number {
+    return this.festival.isActive ? FESTIVAL_MINUTE : this.world.time.minuteOfDay;
+  }
+
+  /** Whether Mid-Autumn night is on (SPEC.md 2.15). */
+  get midAutumn(): boolean {
+    return this.festival.isActive;
+  }
+
+  /**
+   * Turns Mid-Autumn night on or off: at once dark, a full moon over the sea,
+   * every window lit, lanterns in the streets and fireworks on the beach.
+   */
+  setMidAutumn(on: boolean): void {
+    if (on === this.festival.isActive) {
+      return;
+    }
+    this.festival.setActive(on);
+    this.townView.setFestival(on);
+    this.rainbow.clear();
+    this.environment.setFullMoon(on ? this.fullMoonDirection() : undefined);
+  }
+
+  /**
+   * Where the full moon should hang: over the sea, a little left of the
+   * middle and well up the band of sky the night framing shows.
+   */
+  private fullMoonDirection(): Vector3 {
+    const framing = this.defaultFraming();
+    const eye = this.camera.clone();
+    eye.position.copy(framing.position);
+    eye.lookAt(framing.target);
+    eye.updateMatrixWorld();
+    eye.updateProjectionMatrix();
+    const towards = (x: number, y: number): Vector3 =>
+      new Vector3(x, y, 0.5).unproject(eye).sub(eye.position).normalize();
+    // The top edge of the picture, and the moon half way up the sky below it.
+    const top = Math.asin(towards(0, 1).y);
+    const elevation = Math.max(MathUtils.degToRad(5), top * 0.55);
+    const along = towards(-0.3, 0.9).setY(0).normalize();
+    return along.multiplyScalar(Math.cos(elevation)).setY(Math.sin(elevation));
+  }
+
+  /** A rainbow may follow the rain, by day (SPEC.md 2.8). */
+  private watchForRainbow(weather: Weather): void {
+    const previous = this.lastWeather;
+    this.lastWeather = weather;
+    if (weather === 'Rain' || this.festival.isActive) {
+      this.rainbow.clear();
+      return;
+    }
+    const minute = this.world.time.minuteOfDay;
+    const daytime = minute > SUNRISE_MINUTE + 20 && minute < SUNSET_MINUTE - 30;
+    if (previous === 'Rain' && daytime) {
+      this.rainbow.rainStopped(this.camera, this.controls.target);
+    }
+  }
+
+  /** Stands a rainbow up now, for tooling and screenshots. */
+  showRainbow(double = false): void {
+    this.rainbow.show(this.camera, this.controls.target, double);
+  }
+
+  get rainbowState(): { active: boolean; double: boolean } {
+    return this.rainbow.state;
+  }
+
   getSpeed(): SpeedLevel {
     return this.scheduler.getSpeed();
   }
@@ -453,7 +547,8 @@ export class App {
 
     const deltaSeconds = this.clock.getDelta();
     this.judgeQuality(deltaSeconds);
-    this.world.tickMany(this.scheduler.ticksForFrame(deltaSeconds));
+    const ticks = this.scheduler.ticksForFrame(deltaSeconds);
+    this.world.tickMany(ticks);
 
     // The picture eases towards the weather over a couple of real seconds;
     // the ground dries out more slowly than it gets wet (SPEC.md 2.8).
@@ -469,7 +564,7 @@ export class App {
 
     // Real elapsed time drives clouds, swell and twinkle only; the
     // simulation never sees it (SPEC.md 2.14).
-    this.environment.update(this.world.time.minuteOfDay, this.clock.elapsedTime);
+    this.environment.update(this.shownMinute(), this.clock.elapsedTime);
     this.scenery.update(this.environment.state, this.clock.elapsedTime, this.camera.position);
     this.townView.update(
       this.world,
@@ -477,6 +572,7 @@ export class App {
       deltaSeconds,
       this.clock.elapsedTime,
       this.camera,
+      this.scheduler.getSpeed(),
     );
     const speed = this.scheduler.getSpeed();
     this.citizenView.update(deltaSeconds, this.camera, weather === 'Rain', speed < 20);
@@ -484,6 +580,19 @@ export class App {
     this.rain.update(deltaSeconds, this.rainAmount, this.camera, this.controls.target);
     // The animals run on real time too, and hide at speed (SPEC.md 2.14).
     this.wildlife.update(deltaSeconds, this.scheduler.getSpeed(), this.environment.state);
+    // Boats sail on real time like the clouds, at every speed (SPEC.md 2.14).
+    this.boats.update(this.environment.state, this.clock.elapsedTime, this.camera);
+    this.trafficLights.update(this.world, this.camera, this.environment.state.lampFactor);
+    this.smoke.update(this.world, this.environment.state, deltaSeconds);
+    this.festival.update(deltaSeconds, this.camera);
+    this.watchForRainbow(weather);
+    this.rainbow.update(
+      deltaSeconds,
+      ticks * GAME_MINUTES_PER_TICK,
+      1 - this.rainAmount,
+      this.cloudAmount,
+      this.camera,
+    );
 
     this.debugView?.update(this.world);
 
@@ -780,6 +889,9 @@ export class App {
     if (weather !== undefined) {
       this.world.setWeather(weather);
     }
+    if (event.code === 'KeyM') {
+      this.setMidAutumn(!this.midAutumn);
+    }
     if (event.code === 'KeyQ') {
       const tiers: Quality[] = ['high', 'medium', 'low'];
       this.setQuality(tiers[(tiers.indexOf(this.qualityTier) + 1) % tiers.length]);
@@ -805,6 +917,10 @@ export class App {
     window.removeEventListener('keydown', this.handleKeyDown);
     document.removeEventListener('visibilitychange', this.handleVisibilityChange);
     this.debugView?.dispose();
+    this.boats.dispose();
+    this.smoke.dispose();
+    this.rainbow.dispose();
+    this.festival.dispose();
     this.controls.dispose();
     this.renderer.dispose();
     this.renderer.domElement.remove();

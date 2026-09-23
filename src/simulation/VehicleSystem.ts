@@ -5,13 +5,16 @@ import { FLEET, VEHICLE_SPEED } from '../world/Fleet.js';
 import { SIDEWALK_EDGE, TRAFFIC_LIGHTS, type TrafficLight } from '../world/Town.js';
 
 import { GAME_MINUTES_PER_TICK } from './constants.js';
-import { NavGraph, parkingNodeId, parkingNodesForPlace } from './Navigation.js';
+import { kerbSpaceHeading, NavGraph, parkingNodeId, parkingNodesForPlace } from './Navigation.js';
 
 /** Floating point guard when stepping onto a path point. */
 const ARRIVAL_TOLERANCE = 1e-6;
 
-/** How far to the right of the centreline a car drives, so two can pass. */
-const LANE_OFFSET = 1.7;
+/**
+ * How far to the right of the centreline a car drives, so two can pass and
+ * both stay clear of the cars parked half up on the kerb (Navigation.ts).
+ */
+const LANE_OFFSET = 1.2;
 
 /** A car holds this far behind the one ahead in its lane. */
 const FOLLOWING_GAP = 7;
@@ -58,7 +61,7 @@ export class VehicleSystem {
         state: 'parked',
         parkedAtNodeId: homeNodeId,
         position: { ...home },
-        heading: 0,
+        heading: parkedHeading(homeNodeId, 0),
         distanceDriven: 0,
         path: [],
         pathIndex: 0,
@@ -256,6 +259,7 @@ export class VehicleSystem {
     vehicle.state = 'parked';
     vehicle.parkedAtNodeId = nodeId;
     vehicle.position = { ...this.roads.node(nodeId).position };
+    vehicle.heading = parkedHeading(nodeId, vehicle.heading);
     vehicle.path = [];
     vehicle.pathIndex = 0;
     vehicle.waiting = null;
@@ -320,4 +324,13 @@ export class VehicleSystem {
       z: vehicle.position.z + sin * LANE_OFFSET,
     };
   }
+}
+
+/**
+ * The way a car faces once parked. At the kerb it straightens up along the
+ * street; the last leg into a space runs across the road, and a car left at
+ * that angle reads as stuck in the traffic. Anywhere else it keeps its heading.
+ */
+function parkedHeading(nodeId: string, heading: number): number {
+  return kerbSpaceHeading(nodeId) ?? heading;
 }

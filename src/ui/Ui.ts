@@ -43,6 +43,7 @@ export class Ui {
 
   private readonly weather: HTMLElement;
   private readonly weatherButtons = new Map<Weather, HTMLButtonElement>();
+  private readonly lanternButton: HTMLButtonElement;
   private readonly capsule: HTMLButtonElement;
   private readonly capsuleText: HTMLElement;
   private readonly capsuleGlyph: HTMLElement;
@@ -87,6 +88,16 @@ export class Ui {
       this.weatherButtons.set(weather, button);
       this.weather.appendChild(button);
     }
+    // Mid-Autumn night (SPEC.md 2.15): a switch, set apart from the weather.
+    this.weather.appendChild(element('span', 'tt-weather-divider'));
+    this.lanternButton = element('button', 'tt-weather-button tt-lantern') as HTMLButtonElement;
+    this.lanternButton.type = 'button';
+    this.lanternButton.innerHTML = '<span class="tt-glyph">🏮</span><span>Mid-Autumn</span>';
+    this.lanternButton.setAttribute('aria-label', 'Mid-Autumn night');
+    this.lanternButton.addEventListener('click', () => {
+      this.app.setMidAutumn(!this.app.midAutumn);
+    });
+    this.weather.appendChild(this.lanternButton);
 
     this.capsule = element('button', 'tt-capsule tt-card') as HTMLButtonElement;
     this.capsule.type = 'button';
@@ -346,7 +357,9 @@ export class Ui {
     const clock = clockOf(time.minuteOfDay);
 
     const driving = world.vehicles.filter((vehicle) => vehicle.state === 'driving').length;
+    const festival = this.app.midAutumn;
     const status = [
+      festival,
       time.day,
       clock,
       world.citizens.length,
@@ -361,9 +374,12 @@ export class Ui {
       this.statusRows.get('People')!.textContent = String(world.citizens.length);
       this.statusRows.get('Outside')!.textContent = String(world.citizenSystem.outsideCount);
       this.statusRows.get('Cars on the road')!.textContent = String(driving);
-      this.statusRows.get('Weather')!.textContent = `${weatherGlyph(weather)} ${weather}`;
+      this.statusRows.get('Weather')!.textContent =
+        `${weatherGlyph(weather)} ${weather}` + (festival ? ' · 🏮' : '');
       this.capsuleText.textContent = `Day ${time.day} · ${clock} · `;
-      this.capsuleGlyph.textContent = weatherGlyph(weather);
+      this.capsuleGlyph.textContent = weatherGlyph(weather) + (festival ? ' 🏮' : '');
+      this.lanternButton.classList.toggle('tt-active', festival);
+      this.lanternButton.setAttribute('aria-pressed', String(festival));
       for (const [which, button] of this.weatherButtons) {
         button.classList.toggle('tt-active', which === weather);
       }
