@@ -43,6 +43,7 @@ import {
   LIGHTHOUSE,
   PARK,
   PROMENADE_Z,
+  SQUARE,
   SUCCULENTS,
   type Lane,
   OUTDOOR_ZONES,
@@ -703,13 +704,13 @@ export class TownView {
    * bakery stood: a fountain, two benches, the flower beds either side.
    */
   private addSquare(): void {
-    const centreX = 0;
-    const centreZ = 9.6;
+    const centreX = (SQUARE.minX + SQUARE.maxX) / 2;
+    const centreZ = (SQUARE.minZ + SQUARE.maxZ) / 2;
     const ground = groundHeight(centreX, centreZ);
     this.batch('stone').place(
       { x: centreX, y: ground + LAYER_ZONE, z: centreZ },
       { x: groundTiltX(centreX, centreZ) },
-      { x: 16, z: 5.6 },
+      { x: SQUARE.maxX - SQUARE.minX, z: SQUARE.maxZ - SQUARE.minZ },
     );
     const cylinder = this.batch('cylinder');
     cylinder.place(

@@ -1,5 +1,29 @@
 # Changelog
 
+## Fix — props off the paving
+
+The author found lamps, plants and patches of light in the middle of the road.
+
+- Cause: three lists in `world/Town.ts` were placed by coordinate with no check against
+  the streets. Street lamps were spaced from one end of a street to the other, and a
+  street's ends lie inside a junction, so sixteen lamps stood on the crossing street's
+  tarmac; at dusk each threw its nine metre pool of light into the middle of the
+  junction, which is the "yellow road" the author saw. The high street's shrubs and two
+  agaves were listed at the cross streets' own x, so they stood on the tarmac too; a few
+  olives and shrubs stood in the supermarket car park; the agaves along the promenade
+  and the upper lane sat on the lane itself.
+- Rule: `pavedAreas()` lists every patch of paving (streets to the tarmac or to the
+  pavement edge, lanes and steps, the car park and its apron, the square), `pavingUnder()`
+  tests a disc against them, and `offPaving()` nudges a point out by the shortest way,
+  giving up when there is nowhere to go. Every tree, shrub and succulent list now passes
+  through it before export, and a junction lamp slides along its own street to the
+  pavement past the crossing rather than being placed in the road. The two flower beds
+  by the square move inside the cross streets' pavements. Lamps 48 → 43, trees 54 → 52,
+  shrubs 20 → 18; nothing else changed.
+- Regression tests: every lamp is off the tarmac, lanes, car park and square; every
+  tree trunk, shrub, succulent and flower bed corner is off all paving, pavements
+  included; and the rule has not emptied the town.
+
 ## Phase 5 — Weather and behavioural effects
 
 Weather that changes what the citizens do, not just how the town looks (SPEC 2.8).

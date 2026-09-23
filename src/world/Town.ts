@@ -1,6 +1,6 @@
 import type { Building, HouseStyle, RoofProp, YardProp } from '../entities/Building.js';
 import { footprintBounds } from '../entities/Building.js';
-import type { Point } from '../entities/geometry.js';
+import { distance, type Point } from '../entities/geometry.js';
 
 /**
  * The fixed town layout, as plain data (SPEC.md 2.3, DESIGN.md).
@@ -397,6 +397,53 @@ export function getZone(id: string): OutdoorZone {
 /** The park: a lawn with paths and trees, in the block west of the centre. */
 export const PARK = getZone('park-lawn');
 
+/**
+ * The pedestrian lanes (SPEC.md 2.3, decision 29): a second network for
+ * people only, paved in pale stone with white joints. The seafront promenade
+ * runs behind the northern houses, the upper lane behind the southern ones
+ * below the church, and at every cross street a flight of steps joins each
+ * of them to the pavement where the street ends. The outer house rows face
+ * these lanes, so their doors are on the pedestrian network and the cars
+ * stay behind the houses. Same shape as a Street, so the graph code and the
+ * renderer can treat the two alike.
+ */
+export interface Lane extends Street {
+  /** Steps rather than a paved ramp: the lane climbs the slope. */
+  steps: boolean;
+}
+
+export const PROMENADE_Z = -60;
+export const UPPER_LANE_Z = 60;
+export const LANE_WIDTH = 2.4;
+
+export const LANES: readonly Lane[] = [
+  { id: 'promenade', axis: 'x', at: PROMENADE_Z, from: -90, to: 90, steps: false },
+  { id: 'upper-lane', axis: 'x', at: UPPER_LANE_Z, from: -90, to: 90, steps: false },
+  ...CROSS_X.flatMap((x, index): Lane[] => [
+    {
+      id: `steps-north-${index}`,
+      axis: 'z',
+      at: x,
+      from: PROMENADE_Z,
+      to: -LANE_Z - SIDEWALK_OFFSET,
+      steps: true,
+    },
+    {
+      id: `steps-south-${index}`,
+      axis: 'z',
+      at: x,
+      from: LANE_Z + SIDEWALK_OFFSET,
+      to: UPPER_LANE_Z,
+      steps: true,
+    },
+  ]),
+  // The path up from the upper lane to the church door.
+  { id: 'church-path', axis: 'z', at: 0, from: UPPER_LANE_Z, to: 66.5, steps: true },
+];
+
+/** The little paved square across the high street from the cafe. */
+export const SQUARE = { minX: -8, maxX: 8, minZ: 6.8, maxZ: 12.4 } as const;
+
 /** The car park at the east end, off the east cross street. */
 export const PARKING_LOT = {
   id: 'parking-lot',
@@ -413,6 +460,14 @@ export const PARKING_LOT = {
   entrance: { x: 58, z: -15 },
 } as const;
 
+/** The lot and its apron onto the cross street, as one patch of paving. */
+const PARKING_LOT_BOUNDS = {
+  minX: PARKING_LOT.minX - 4.5,
+  maxX: PARKING_LOT.maxX,
+  minZ: PARKING_LOT.minZ,
+  maxZ: PARKING_LOT.maxZ,
+};
+
 /**
  * The trees of a dry island (DESIGN.md §9): olives with loose silver-green
  * crowns, cypresses as dark vertical lines, and the park's big round green
@@ -425,45 +480,158 @@ export interface Tree {
 }
 
 /**
+ * An axis aligned patch of paving nothing may stand on: a street (its tarmac
+ * alone, or with its pavements), a pedestrian lane or flight of steps, the
+ * car park, the square. Every prop and plant in the town is checked against
+ * these before it is placed (the rule that keeps lamps out of junctions).
+ */
+export interface Paved {
+  name: string;
+  minX: number;
+  maxX: number;
+  minZ: number;
+  maxZ: number;
+}
+
+/**
+ * Everything paved. With `pavements` the streets count out to the pavement
+ * edge, which is what a plant must keep off; without, only the tarmac, which
+ * is what a lamp on the pavement must keep off.
+ */
+export function pavedAreas(pavements: boolean): Paved[] {
+  const areas: Paved[] = [];
+  const half = pavements ? SIDEWALK_EDGE : ROAD_WIDTH / 2;
+  for (const street of STREETS) {
+    areas.push(
+      street.axis === 'x'
+        ? {
+            name: street.id,
+            minX: street.from,
+            maxX: street.to,
+            minZ: street.at - half,
+            maxZ: street.at + half,
+          }
+        : {
+            name: street.id,
+            minX: street.at - half,
+            maxX: street.at + half,
+            minZ: street.from,
+            maxZ: street.to,
+          },
+    );
+  }
+  for (const lane of LANES) {
+    const w = LANE_WIDTH / 2;
+    areas.push(
+      lane.axis === 'x'
+        ? { name: lane.id, minX: lane.from, maxX: lane.to, minZ: lane.at - w, maxZ: lane.at + w }
+        : { name: lane.id, minX: lane.at - w, maxX: lane.at + w, minZ: lane.from, maxZ: lane.to },
+    );
+  }
+  areas.push({ name: 'parking-lot', ...PARKING_LOT_BOUNDS });
+  areas.push({ name: 'square', ...SQUARE });
+  return areas;
+}
+
+/** The paved area a disc of `radius` at `point` overlaps, if any. */
+export function pavingUnder(point: Point, radius: number, pavements: boolean): Paved | undefined {
+  return pavedAreas(pavements).find(
+    (area) =>
+      point.x + radius > area.minX &&
+      point.x - radius < area.maxX &&
+      point.z + radius > area.minZ &&
+      point.z - radius < area.maxZ,
+  );
+}
+
+/**
+ * Moves a point off any paving it overlaps, by the shortest way out, a few
+ * times over; gives up (undefined) when there is nowhere clear to go, in
+ * which case the caller drops the prop. Used on every list below, so a
+ * hand-placed shrub that drifts onto a road with the next layout change is
+ * nudged or dropped rather than drawn on the tarmac.
+ */
+export function offPaving(point: Point, radius: number, pavements = true): Point | undefined {
+  const clearance = 0.25;
+  let current = { ...point };
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    const area = pavingUnder(current, radius, pavements);
+    if (!area) {
+      return current;
+    }
+    const outs = [
+      { x: area.minX - radius - clearance - current.x, z: 0 },
+      { x: area.maxX + radius + clearance - current.x, z: 0 },
+      { x: 0, z: area.minZ - radius - clearance - current.z },
+      { x: 0, z: area.maxZ + radius + clearance - current.z },
+    ];
+    const shortest = outs.reduce((best, out) =>
+      Math.abs(out.x) + Math.abs(out.z) < Math.abs(best.x) + Math.abs(best.z) ? out : best,
+    );
+    current = { x: current.x + shortest.x, z: current.z + shortest.z };
+  }
+  return undefined;
+}
+
+/** Applies offPaving to a list of things with a position, dropping the ones with nowhere to go. */
+function keepOffPaving<T extends { position: Point }>(
+  items: readonly T[],
+  radius: (item: T) => number,
+): T[] {
+  const kept: T[] = [];
+  for (const item of items) {
+    const moved = offPaving(item.position, radius(item));
+    if (moved) {
+      kept.push({ ...item, position: moved });
+    }
+  }
+  return kept;
+}
+
+/**
  * Trees. The park is planted densely with round green trees, the high
  * street gets a row of olives, every empty house slot gets an olive or a
  * cypress, and the corners of the town get cypresses so the grid does not
  * end in bare ground.
  */
-export const TREES: readonly Tree[] = [
-  ...parkTrees(),
-  ...streetTrees(),
-  ...emptySlotTrees(),
-  // Around the school playground.
-  { position: { x: -50, z: -9 }, shape: 'olive', height: 6.5 },
-  { position: { x: -22, z: -9 }, shape: 'olive', height: 6 },
-  { position: { x: -50, z: -23 }, shape: 'cypress', height: 10 },
-  { position: { x: -22, z: -23 }, shape: 'cypress', height: 9.5 },
-  // The green at the west end of the high street.
-  { position: { x: -66, z: -14 }, shape: 'olive', height: 7 },
-  { position: { x: -74, z: -11 }, shape: 'cypress', height: 11 },
-  { position: { x: -70, z: 13 }, shape: 'olive', height: 7 },
-  { position: { x: -78, z: 16 }, shape: 'olive', height: 6 },
-  { position: { x: -62, z: 16 }, shape: 'cypress', height: 10 },
-  // Beside the car park and the eastern apartments.
-  { position: { x: 79, z: -13 }, shape: 'olive', height: 6.5 },
-  { position: { x: 60, z: 14 }, shape: 'olive', height: 6 },
-  { position: { x: 80, z: 12 }, shape: 'cypress', height: 9.5 },
-  { position: { x: 60, z: -50 }, shape: 'cypress', height: 10 },
-  { position: { x: 80, z: -48 }, shape: 'olive', height: 6.5 },
-  { position: { x: -80, z: 48 }, shape: 'olive', height: 6.5 },
-  { position: { x: -60, z: 50 }, shape: 'cypress', height: 10 },
-  // The corners of the town, and by the church.
-  { position: { x: -92, z: -50 }, shape: 'cypress', height: 11 },
-  { position: { x: -92, z: 52 }, shape: 'olive', height: 7 },
-  { position: { x: 92, z: -50 }, shape: 'olive', height: 7 },
-  { position: { x: 92, z: 52 }, shape: 'cypress', height: 11 },
-  { position: { x: -92, z: 0 }, shape: 'olive', height: 6.5 },
-  { position: { x: 92, z: 2 }, shape: 'olive', height: 6.5 },
-  { position: { x: -9, z: 84 }, shape: 'cypress', height: 12 },
-  { position: { x: 9, z: 85 }, shape: 'cypress', height: 11 },
-  { position: { x: 12, z: 70 }, shape: 'cypress', height: 10 },
-];
+export const TREES: readonly Tree[] = keepOffPaving(
+  [
+    ...parkTrees(),
+    ...streetTrees(),
+    ...emptySlotTrees(),
+    // Around the school playground.
+    { position: { x: -50, z: -9 }, shape: 'olive', height: 6.5 },
+    { position: { x: -22, z: -9 }, shape: 'olive', height: 6 },
+    { position: { x: -50, z: -23 }, shape: 'cypress', height: 10 },
+    { position: { x: -22, z: -23 }, shape: 'cypress', height: 9.5 },
+    // The green at the west end of the high street.
+    { position: { x: -66, z: -14 }, shape: 'olive', height: 7 },
+    { position: { x: -74, z: -11 }, shape: 'cypress', height: 11 },
+    { position: { x: -70, z: 13 }, shape: 'olive', height: 7 },
+    { position: { x: -78, z: 16 }, shape: 'olive', height: 6 },
+    { position: { x: -62, z: 16 }, shape: 'cypress', height: 10 },
+    // Beside the car park and the eastern apartments.
+    { position: { x: 79, z: -13 }, shape: 'olive', height: 6.5 },
+    { position: { x: 60, z: 14 }, shape: 'olive', height: 6 },
+    { position: { x: 80, z: 12 }, shape: 'cypress', height: 9.5 },
+    { position: { x: 60, z: -50 }, shape: 'cypress', height: 10 },
+    { position: { x: 80, z: -48 }, shape: 'olive', height: 6.5 },
+    { position: { x: -80, z: 48 }, shape: 'olive', height: 6.5 },
+    { position: { x: -60, z: 50 }, shape: 'cypress', height: 10 },
+    // The corners of the town, and by the church.
+    { position: { x: -92, z: -50 }, shape: 'cypress', height: 11 },
+    { position: { x: -92, z: 52 }, shape: 'olive', height: 7 },
+    { position: { x: 92, z: -50 }, shape: 'olive', height: 7 },
+    { position: { x: 92, z: 52 }, shape: 'cypress', height: 11 },
+    { position: { x: -92, z: 0 }, shape: 'olive', height: 6.5 },
+    { position: { x: 92, z: 2 }, shape: 'olive', height: 6.5 },
+    { position: { x: -9, z: 84 }, shape: 'cypress', height: 12 },
+    { position: { x: 9, z: 85 }, shape: 'cypress', height: 11 },
+    { position: { x: 12, z: 70 }, shape: 'cypress', height: 10 },
+  ],
+  // The trunk must be off the paving; a crown may lean over it.
+  (tree) => (tree.shape === 'cypress' ? 0.6 : 0.9),
+);
 
 /** Agaves and cacti (DESIGN.md §9): along the lanes and by the church. */
 export interface Succulent {
@@ -471,20 +639,23 @@ export interface Succulent {
   kind: 'agave' | 'cactus';
 }
 
-export const SUCCULENTS: readonly Succulent[] = [
-  ...[-80, -58, -36, -12, 12, 36, 58, 80].map((x, index) => ({
-    position: { x, z: -58.4 },
-    kind: (index % 3 === 0 ? 'cactus' : 'agave') as Succulent['kind'],
-  })),
-  ...[-78, -50, -28, -6, 6, 28, 50, 78].map((x, index) => ({
-    position: { x, z: 58.4 },
-    kind: (index % 3 === 1 ? 'cactus' : 'agave') as Succulent['kind'],
-  })),
-  { position: { x: -8, z: 67 }, kind: 'agave' },
-  { position: { x: 8, z: 67 }, kind: 'agave' },
-  { position: { x: -15, z: 8.5 }, kind: 'agave' },
-  { position: { x: 15, z: 8.5 }, kind: 'agave' },
-];
+export const SUCCULENTS: readonly Succulent[] = keepOffPaving(
+  [
+    ...[-80, -58, -36, -12, 12, 36, 58, 80].map((x, index) => ({
+      position: { x, z: -58.4 },
+      kind: (index % 3 === 0 ? 'cactus' : 'agave') as Succulent['kind'],
+    })),
+    ...[-78, -50, -28, -6, 6, 28, 50, 78].map((x, index) => ({
+      position: { x, z: 58.4 },
+      kind: (index % 3 === 1 ? 'cactus' : 'agave') as Succulent['kind'],
+    })),
+    { position: { x: -8, z: 67 }, kind: 'agave' },
+    { position: { x: 8, z: 67 }, kind: 'agave' },
+    { position: { x: -15, z: 8.5 }, kind: 'agave' },
+    { position: { x: 15, z: 8.5 }, kind: 'agave' },
+  ],
+  () => 0.8,
+);
 
 /** A loose ring of trees inside the park, leaving the middle for the lawn. */
 function parkTrees(): Tree[] {
@@ -552,16 +723,19 @@ export interface Shrub {
 }
 
 /** Shrubs along the high street verges and at the ends of the park path. */
-export const SHRUBS: readonly Shrub[] = [
-  ...[-68, -54, -30, -18, 18, 30, 54, 68].flatMap((x) => [
-    { position: { x, z: -7.5 }, radius: 1.1 },
-    { position: { x, z: 7.5 }, radius: 1.1 },
-  ]),
-  { position: { x: -47, z: 18.5 }, radius: 1.4 },
-  { position: { x: -25, z: 18.5 }, radius: 1.4 },
-  { position: { x: 57, z: -10 }, radius: 1.2 },
-  { position: { x: 77, z: -10 }, radius: 1.2 },
-];
+export const SHRUBS: readonly Shrub[] = keepOffPaving(
+  [
+    ...[-68, -54, -30, -18, 18, 30, 54, 68].flatMap((x) => [
+      { position: { x, z: -7.5 }, radius: 1.1 },
+      { position: { x, z: 7.5 }, radius: 1.1 },
+    ]),
+    { position: { x: -47, z: 18.5 }, radius: 1.4 },
+    { position: { x: -25, z: 18.5 }, radius: 1.4 },
+    { position: { x: 57, z: -10 }, radius: 1.2 },
+    { position: { x: 77, z: -10 }, radius: 1.2 },
+  ],
+  (shrub) => shrub.radius,
+);
 
 /** A bed of flowers: a low patch of colour. */
 export interface FlowerBed {
@@ -572,9 +746,10 @@ export interface FlowerBed {
 }
 
 export const FLOWER_BEDS: readonly FlowerBed[] = [
-  // Either side of the little square across from the cafe.
-  { minX: -13, maxX: -8.5, minZ: 7.5, maxZ: 11 },
-  { minX: 8.5, maxX: 13, minZ: 7.5, maxZ: 11 },
+  // Either side of the little square across from the cafe, inside the
+  // pavements of the cross streets.
+  { minX: -11.6, maxX: -8.4, minZ: 7.5, maxZ: 11 },
+  { minX: 8.4, maxX: 11.6, minZ: 7.5, maxZ: 11 },
   // In the park, beside the path.
   { minX: -44, maxX: -28, minZ: 21.5, maxZ: 23 },
   // The green at the west end.
@@ -623,50 +798,6 @@ export const TRAFFIC_LIGHTS: readonly TrafficLight[] = [
 ];
 
 /**
- * The pedestrian lanes (SPEC.md 2.3, decision 29): a second network for
- * people only, paved in pale stone with white joints. The seafront promenade
- * runs behind the northern houses, the upper lane behind the southern ones
- * below the church, and at every cross street a flight of steps joins each
- * of them to the pavement where the street ends. The outer house rows face
- * these lanes, so their doors are on the pedestrian network and the cars
- * stay behind the houses. Same shape as a Street, so the graph code and the
- * renderer can treat the two alike.
- */
-export interface Lane extends Street {
-  /** Steps rather than a paved ramp: the lane climbs the slope. */
-  steps: boolean;
-}
-
-export const PROMENADE_Z = -60;
-export const UPPER_LANE_Z = 60;
-export const LANE_WIDTH = 2.4;
-
-export const LANES: readonly Lane[] = [
-  { id: 'promenade', axis: 'x', at: PROMENADE_Z, from: -90, to: 90, steps: false },
-  { id: 'upper-lane', axis: 'x', at: UPPER_LANE_Z, from: -90, to: 90, steps: false },
-  ...CROSS_X.flatMap((x, index): Lane[] => [
-    {
-      id: `steps-north-${index}`,
-      axis: 'z',
-      at: x,
-      from: PROMENADE_Z,
-      to: -LANE_Z - SIDEWALK_OFFSET,
-      steps: true,
-    },
-    {
-      id: `steps-south-${index}`,
-      axis: 'z',
-      at: x,
-      from: LANE_Z + SIDEWALK_OFFSET,
-      to: UPPER_LANE_Z,
-      steps: true,
-    },
-  ]),
-  // The path up from the upper lane to the church door.
-  { id: 'church-path', axis: 'z', at: 0, from: UPPER_LANE_Z, to: 66.5, steps: true },
-];
-
-/**
  * The two landmarks (SPEC.md 2.3, decision 29): the church at the top of the
  * slope behind the southern houses, and the lighthouse on the headland
  * where the shore runs furthest out to sea. Neither is on the navigation
@@ -687,7 +818,12 @@ export const LIGHTHOUSE = {
 
 export const STREET_LAMP_HEIGHT = 5.2;
 
-/** Street lamps, spaced along the pavement of every street. */
+/**
+ * Street lamps, spaced along the pavement of every street. A lamp that
+ * would stand on another street's tarmac (the ends of a street are in a
+ * junction) or on a lane or the car park is left out: it stays on the
+ * pavement or it is not placed.
+ */
 export function streetLampPositions(spacing = 26): Point[] {
   const positions: Point[] = [];
 
@@ -698,11 +834,22 @@ export function streetLampPositions(spacing = 26): Point[] {
       const along = street.from + (index / count) * length;
       // Alternate sides so the lamps stagger down the street.
       const side = index % 2 === 0 ? -1 : 1;
-      positions.push(
+      const at = (a: number): Point =>
         street.axis === 'x'
-          ? { x: along, z: street.at + side * SIDEWALK_OFFSET }
-          : { x: street.at + side * SIDEWALK_OFFSET, z: along },
+          ? { x: a, z: street.at + side * SIDEWALK_OFFSET }
+          : { x: street.at + side * SIDEWALK_OFFSET, z: a };
+      // In a junction, slide the lamp along its own street to the pavement
+      // just past the crossing; if that is paved too, leave it out.
+      const step = SIDEWALK_EDGE + 1;
+      const candidates = [at(along), at(along + step), at(along - step)].filter(
+        (candidate) =>
+          (street.axis === 'x' ? candidate.x : candidate.z) >= street.from &&
+          (street.axis === 'x' ? candidate.x : candidate.z) <= street.to,
       );
+      const clear = candidates.find((candidate) => !pavingUnder(candidate, 0.2, false));
+      if (clear && !positions.some((existing) => distance(existing, clear) < 4)) {
+        positions.push(clear);
+      }
     }
   }
 

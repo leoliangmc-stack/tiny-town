@@ -11,8 +11,14 @@ import {
 } from '../src/simulation/Navigation.js';
 import {
   BUILDINGS,
+  FLOWER_BEDS,
   LANES,
   OUTDOOR_ZONES,
+  SHRUBS,
+  SUCCULENTS,
+  TREES,
+  pavingUnder,
+  streetLampPositions,
   PARKING_LOT,
   SIDEWALK_EDGE,
   STREETS,
@@ -181,6 +187,54 @@ describe('the layout', () => {
       const nearest = Math.min(...zone.spawnPoints.map((spawn) => distance(door, spawn)));
       expect(nearest).toBeLessThan(14);
     }
+  });
+
+  it('keeps every lamp off the tarmac, the lanes, the car park and the square', () => {
+    // The ends of a street lie in a junction; a lamp there stands in the road.
+    for (const lamp of streetLampPositions()) {
+      const paving = pavingUnder(lamp, 0.2, false);
+      expect(paving, `lamp at ${lamp.x},${lamp.z} stands on ${paving?.name}`).toBeUndefined();
+    }
+    expect(streetLampPositions().length).toBeGreaterThan(40);
+  });
+
+  it('keeps every plant and prop off the paving, pavements included', () => {
+    const offenders: string[] = [];
+    const check = (what: string, x: number, z: number, radius: number): void => {
+      const paving = pavingUnder({ x, z }, radius, true);
+      if (paving) {
+        offenders.push(`${what} at ${x.toFixed(1)},${z.toFixed(1)} on ${paving.name}`);
+      }
+    };
+    for (const tree of TREES) {
+      check(
+        `tree(${tree.shape})`,
+        tree.position.x,
+        tree.position.z,
+        tree.shape === 'cypress' ? 0.6 : 0.9,
+      );
+    }
+    for (const shrub of SHRUBS) {
+      check('shrub', shrub.position.x, shrub.position.z, shrub.radius);
+    }
+    for (const plant of SUCCULENTS) {
+      check(plant.kind, plant.position.x, plant.position.z, 0.8);
+    }
+    for (const bed of FLOWER_BEDS) {
+      for (const [x, z] of [
+        [bed.minX, bed.minZ],
+        [bed.maxX, bed.minZ],
+        [bed.minX, bed.maxZ],
+        [bed.maxX, bed.maxZ],
+      ]) {
+        check('flower bed', x, z, 0);
+      }
+    }
+    expect(offenders).toEqual([]);
+    // The rule must not have emptied the town.
+    expect(TREES.length).toBeGreaterThan(50);
+    expect(SHRUBS.length).toBeGreaterThan(10);
+    expect(SUCCULENTS.length).toBeGreaterThan(12);
   });
 
   it('is big enough to read as a town', () => {
