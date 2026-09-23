@@ -1,5 +1,21 @@
 # Changelog
 
+## Phase 7.4 — Umbrella icon rules
+
+SPEC 2.10 allows three to five icons on screen, each fading out in two to three seconds.
+The ☂ icon stood over everybody outside for as long as it rained, so a rainy street showed
+twenty of them at once.
+
+- `render/OverheadIcons.ts`: a scheduler with four slots and a pool of four billboards,
+  each with its own material so each fades on its own. An icon lives 2.5 s (0.3 s in,
+  1 s out); one offered while the slots are full is dropped, not queued; the same person
+  waits 20 s for another. Four draw calls at most, none when nothing is showing, in place
+  of an instanced plane per citizen.
+- The umbrella icon now marks the moment an umbrella goes up, when rain starts or somebody
+  steps out into it, and only for citizens inside the camera's view. Still hidden at 20x
+  and 100x; switching to those speeds takes down the ones showing.
+- Tests: the cap, the lifetime and fade, the freed slot, the cooldown, the clear at speed.
+
 ## Phase 7.3 — Rainbow button and a bigger Mid-Autumn night
 
 SPEC decisions 38 and 39. The author changed their mind on the rainbow and asked for a

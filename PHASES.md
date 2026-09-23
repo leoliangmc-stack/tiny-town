@@ -358,6 +358,25 @@ night (SPEC decisions 38 and 39).
 - A tap on the palace shows Chang'e and the rabbit close up.
 - Tests, build and lint green; determinism untouched.
 
+## Phase 7.4 — Umbrella icon rules
+
+**Goal.** Bring the ☂ icon in line with SPEC 2.10. It showed over every citizen outside
+for as long as it rained; the SPEC allows three to five icons on screen, each fading out
+over two to three seconds.
+
+**Scope.**
+
+- The icon marks the moment an umbrella goes up (rain starts, or somebody steps out into
+  it), for citizens the camera can see.
+- At most four icons at once; an icon offered while all four are showing is dropped, not
+  queued. Each lives 2.5 s, fading in and out. The same person waits 20 s for another.
+- Hidden at 20x and 100x, as before.
+
+**Acceptance.**
+
+- Unit tests for the cap, the lifetime, the fade and the cooldown.
+- Tests, build and lint green; determinism untouched (render side only).
+
 ## v1.1 backlog (do not start before v1 ships)
 
 - Local persistence: save day/time/weather/speed; rebuild citizen positions from schedules on load; time frozen while away; Reset Town in a settings menu.
