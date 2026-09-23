@@ -152,12 +152,18 @@ on at night; wet reflections in rain.
 Soft, slightly exaggerated shapes. Trees may be a little larger than life so the town
 reads as a miniature. Not realistic foliage.
 
-**Dry, with one oasis (Phase 4.7).** Streets and slope: olive trees (silver-grey green,
-loose crowns), cypresses (dark green, tall and thin: the vertical lines of the skyline),
-agaves and a few cacti; the ground between is dry earth-yellow and pale limestone. The
-park keeps its green lawn and big trees as the one green place in town. **Bougainvillea**,
-magenta, climbs the white walls and pergolas of a handful of houses: the one saturated
-colour in the whole style, and rationed like it.
+**Dry in town, with one oasis (Phase 4.7).** Streets and slope: olive trees (silver-grey
+green, loose crowns), cypresses (dark green, tall and thin: the vertical lines of the
+skyline), agaves and a few cacti; the ground between is dry earth-yellow and pale
+limestone. The park keeps its green lawn and big trees as the one green place in town.
+**Bougainvillea**, magenta, climbs the white walls and pergolas of a handful of houses:
+the one saturated colour in the whole style, and rationed like it.
+
+**Green outside (Phase 4.8, decision 30).** The dry ground belongs to the town's coastal
+shelf. Past the edge of the town it fades, over a band of a few dozen metres with no hard
+line, into grass; beyond that are meadows on rolling ground and stands of woodland, and
+the hills and the far forest are green, never bare. The two belong together the way a
+Mediterranean coast does: dry rock at the shore, wooded hills inland.
 
 ## 10. Colour
 
@@ -281,9 +287,9 @@ The town sits in a place, not on a green table (SPEC 2.14).
   The moon is a crescent or a half: a clear face with maria, a soft halo, and no skyglow
   that could wash the stars out. Stars and moon together, "the stars gathered round the
   moon".
-- **Distance.** Hills and a forest around the town, mountains beyond, all fading into the
-  sky colour with distance. Enough to fill the horizon, never enough to compete with the
-  town.
+- **Distance.** Green hills and woodland around the town, grey mountains beyond, all
+  fading into the sky colour with distance. Enough to fill the horizon, never enough to
+  compete with the town.
 - **The floor under the spectacle.** By day the town and its windows are the subject and
   clouds and sea are kept quiet. By night the sky may be spectacular, but the windows,
   street lamps and car lights must still be the brightest, warmest things in the picture.
@@ -291,7 +297,29 @@ The town sits in a place, not on a green table (SPEC 2.14).
 - **Cost.** Sky, clouds, stars, Milky Way, moon and sea are shaders on a few large
   meshes, never particles; distant trees are instanced. Their motion is render-side only.
 
-## 21. Priorities
+## 21. Wildlife
+
+Small life outside the town and in the air (SPEC 2.14, decision 30), the way a real place
+has it: glimpsed, not counted.
+
+- **Rabbits** in the meadows and at the edge of the woods, a few at a time: they hop in
+  short bursts, stop, and nibble with the head down. **Deer**, rarer and further off: a
+  head-down graze, then the head up and still, listening, then a slow walk to a new spot.
+- **Birds** anywhere: a few small birds that fly from perch to perch across the town, with
+  wingbeats and glides, and sit a while on a roof parapet, a lamp, a tree top before the
+  next flight.
+- **Gulls** on the sea side: they wheel in slow circles over the water and the sand,
+  mostly gliding, and come down on the sea wall, the lighthouse gallery or the beach.
+- **Rationed.** A handful of each, never a herd or a flock: the viewer should notice one
+  now and then, not watch a zoo. At 20x and 100x they are hidden, as the icons over the
+  citizens' heads are, so the fast picture stays clean; by night the birds are at rest.
+- **Alive or absent.** A still animal reads as a toy. Every one has a motion of its own:
+  the hop, the nibble, the raised head, the wingbeat, the wheel. Nothing slides.
+- **Render side only.** Like the clouds and the swell, the animals run on real time in the
+  renderer, from their own seeded generator; the simulation, the state hash and the
+  navigation graphs never know they exist. Every kind is one instanced part or two.
+
+## 22. Priorities
 
 1. Overall town composition
 2. Consistent building style
