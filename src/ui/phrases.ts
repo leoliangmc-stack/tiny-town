@@ -42,7 +42,7 @@ function destinationWords(citizen: Citizen): string {
     return 'home';
   }
   if (citizen.workplaceId && id === citizen.workplaceId) {
-    return 'work';
+    return citizen.job === 'Student' ? 'school' : 'work';
   }
   if (kind === 'zone') {
     return (ZONE_WORDS[id] ?? 'in town').replace(/^(on|in|outside) /, (match) =>
@@ -54,6 +54,15 @@ function destinationWords(citizen: Citizen): string {
   } catch {
     return 'town';
   }
+}
+
+/** A delivery driver on the way to a house that is not their own: on the rounds. */
+function onDelivery(citizen: Citizen): boolean {
+  const pending = citizen.pending;
+  if (citizen.job !== 'Delivery Driver' || !pending || pending.activity !== 'Work') {
+    return false;
+  }
+  return pending.place.id !== citizen.workplaceId && pending.place.id !== citizen.homeId;
 }
 
 /** One short line for what the citizen is doing right now. */
@@ -69,14 +78,22 @@ export function describeActivity(citizen: Citizen): string {
         return 'In class at school';
       }
       const where = citizen.workplaceId ? getBuilding(citizen.workplaceId).name : 'work';
-      return place.id === citizen.workplaceId ? `Working at ${where}` : `Working, out at ${where}`;
+      if (place.id === citizen.workplaceId) {
+        return `Working at ${where}`;
+      }
+      // A delivery driver out on the rounds, at the house being delivered to.
+      return `Delivering to ${placeWords(citizen, place.id, place.kind).replace(/^at /, '')}`;
     }
     case 'Walk':
-      return `Walking to ${destinationWords(citizen)}`;
+      return onDelivery(citizen)
+        ? `Walking a delivery to ${destinationWords(citizen)}`
+        : `Walking to ${destinationWords(citizen)}`;
     case 'GoHome':
       return 'Walking home';
     case 'Drive':
-      return `Driving to ${destinationWords(citizen)}`;
+      return onDelivery(citizen)
+        ? `Driving a delivery to ${destinationWords(citizen)}`
+        : `Driving to ${destinationWords(citizen)}`;
     case 'Shop':
       return 'Shopping at the supermarket';
     case 'Socialize':

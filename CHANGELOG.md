@@ -1,5 +1,40 @@
 # Changelog
 
+## Phase 7 — Performance, polish and release
+
+The last v1 phase (PHASES.md Phase 7), with three small fixes from the Phase 6 review.
+
+- Follow indoors: when the followed citizen goes inside, the camera eases back to about
+  twice its distance over a second, so the building and its street are in the picture
+  and it is plain where they went; it comes back in when they come out. No interiors in
+  v1; the idea is in IDEAS.md with a cost estimate.
+- Words: students walk "to school" and are "in class at school"; delivery drivers are
+  "delivering to Ash House" or "driving a delivery to Yew House" rather than "working,
+  out at Green Grocer".
+- Day 1 lateness: the town opens at 05:30 in the middle of the bakers' first shift, so
+  lateness is not counted on Day 1 and the diary no longer opens on a row of "got to the
+  bakery forty minutes late". SPEC 2.2's 05:30 opening is untouched.
+- Quality tiers (`App.setQuality`, key `Q`): high (pixel ratio ≤ 2, 2048 shadow map,
+  full rain), medium (≤ 1.5, 1024, half the rain), low (1, no shadows, a quarter of the
+  rain). A touch device in portrait starts on medium; then the first 90 measured frames
+  after warm-up drop a tier if more than half are slower than 24 ms, at most twice. There
+  is no post-processing pass to turn off.
+- Camera: never below the ground plus 2.5 m, however it is dragged; the target stays
+  above the ground too.
+- Animation: umbrellas unfurl and fold over 0.45 s as the arm comes up; street lamps warm
+  up over 2.2 s with a small flicker on the way; the walk bob stays as it was.
+- README with the 20x time-lapse, a one-line description, the architecture (simulation
+  and render apart, fixed ticks, determinism, headless tests, instancing), deployment,
+  assets (none: everything is generated) and the MIT licence. `docs/media/timelapse.gif`
+  is a day at 6 game minutes a frame, 640×360, 5.6 MB; an MP4 of the same is in the
+  Phase 7 screenshots.
+- Deploy: `.github/workflows/deploy.yml` publishes `dist/` to GitHub Pages on every
+  `v*` or `phase-*` tag, once Pages is enabled and a remote exists.
+- Bundle: 745 kB of JS (199 kB gzip) plus 4.5 kB of CSS; about 200 kB on the wire.
+- Acceptance: SPEC 5.2 tests 1 to 5 run on the desktop and recorded in
+  `docs/phase-7-acceptance.md` with the frame times per tier. The phone column is the
+  author's to fill in on a real device.
+
 ## Phase 6 — Interaction and UI
 
 The observation tools over the town (SPEC 2.9, DESIGN.md §15), in `src/ui/`.

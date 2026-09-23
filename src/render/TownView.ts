@@ -66,8 +66,10 @@ import type { EnvironmentState } from './Environment.js';
 import { glowTexture } from './glow.js';
 import { type BatchOptions, composeMatrix, InstanceBatch } from './InstanceBatch.js';
 
-/** How fast a window or lamp fades between off and on, in real seconds. */
+/** How fast a window fades between off and on, in real seconds. */
 const LIGHT_FADE_SECONDS = 0.7;
+/** Street lamps take longer to warm up, and flicker a little as they do. */
+const LAMP_WARM_SECONDS = 2.2;
 
 const WINDOW_EMISSIVE = 0xffb455;
 const LAMP_EMISSIVE = 0xffc078;
@@ -1919,8 +1921,12 @@ export class TownView {
       glows.instanceColor.needsUpdate = true;
     }
 
-    this.lampLit += (environment.lampFactor - this.lampLit) * ease;
-    this.lampMaterial.emissiveIntensity = this.lampLit * 1.5;
+    const lampEase = 1 - Math.exp(-deltaSeconds / LAMP_WARM_SECONDS);
+    this.lampLit += (environment.lampFactor - this.lampLit) * lampEase;
+    // A flicker while warming up, gone once the lamp is fully on or off.
+    const warming = Math.min(this.lampLit, 1 - this.lampLit) * 4;
+    const flicker = 1 - Math.min(1, warming) * 0.25 * (0.5 + 0.5 * Math.sin(elapsedSeconds * 37));
+    this.lampMaterial.emissiveIntensity = this.lampLit * 1.5 * flicker;
     // Lamps pool wider on a wet street.
     this.lampPoolMaterial.opacity = this.lampLit * (0.3 + 0.25 * this.wet);
     this.lampHaloMaterial.opacity = this.lampLit * 0.36;

@@ -479,6 +479,21 @@ export class Environment {
   }
 
   /**
+   * Sets the shadow map size, or turns shadows off with 0 (Phase 7 quality
+   * tiers). The old map is dropped so the renderer makes a new one.
+   */
+  setShadowMap(size: number): void {
+    this.sun.castShadow = size > 0;
+    if (size > 0) {
+      this.sun.shadow.mapSize.set(size, size);
+    }
+    if (this.sun.shadow.map) {
+      this.sun.shadow.map.dispose();
+      this.sun.shadow.map = null;
+    }
+  }
+
+  /**
    * Sets where the haze starts and ends. The camera backs off further on a
    * narrow screen, so the range follows the framing rather than being fixed.
    */

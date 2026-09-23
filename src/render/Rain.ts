@@ -45,6 +45,7 @@ export class Rain {
   private readonly drops: Drop[] = [];
   private readonly centre = new Vector3();
   private readonly hidden = new Matrix4().makeScale(0, 0, 0);
+  private budget = 1;
 
   constructor(mobile: boolean) {
     this.root.name = 'rain';
@@ -70,6 +71,11 @@ export class Rain {
       });
     }
     this.root.visible = false;
+  }
+
+  /** How much of the rain a weaker device draws, 0 to 1 (Phase 7 quality tiers). */
+  setBudget(fraction: number): void {
+    this.budget = Math.min(1, Math.max(0, fraction));
   }
 
   /**
@@ -102,7 +108,7 @@ export class Rain {
         drop.y = floor + CEILING + (drop.y - floor);
       }
       // Only the fraction the amount asks for is drawn, from the front.
-      if (index > amount * this.drops.length) {
+      if (index > amount * this.budget * this.drops.length) {
         this.mesh.setMatrixAt(index, this.hidden);
         return;
       }

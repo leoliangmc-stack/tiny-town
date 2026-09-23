@@ -13,3 +13,9 @@ without first moving it into `SPEC.md` and `PHASES.md`.
   at the school, a chalkboard and parasols at the cafe, washing lines, school bags, taxis,
   puddles and drips from eaves in rain, wet-road reflections of car lights, a vegetable
   patch.
+- **Interiors, v1.1 candidate (author, Phase 6 review).** A cut-away view when following
+  somebody indoors: the roof of the building lifts off and a single room is shown (a
+  table, a bed, a counter) with the citizen at it. Estimated cost: one interior template
+  per building kind (7), a roof-lift animation, indoor activity poses, and a camera mode
+  that frames the room; about one phase of work. Not started: v1 keeps the camera at the
+  door and says in the panel what they are doing inside (SPEC 4.2).

@@ -82,7 +82,12 @@ interface Drawn {
   heading: number;
   /** A phase offset so idle gestures are not in unison. */
   idleOffset: number;
+  /** How far the umbrella is open, 0 to 1, eased so it unfurls and folds. */
+  umbrella: number;
 }
+
+/** Real seconds an umbrella takes to open or close. */
+const UMBRELLA_SECONDS = 0.45;
 
 /**
  * The miniature people, drawn as instanced parts: one draw call per body part
@@ -150,6 +155,7 @@ export class CitizenView {
         z: citizen.position.z,
         heading: citizen.heading,
         idleOffset: index * 1.7,
+        umbrella: 0,
       });
       const look = citizen.look;
       this.parts.head.setColorAt(index, new Color(look.skin));
@@ -200,6 +206,9 @@ export class CitizenView {
       drawn.x += (citizen.position.x - drawn.x) * ease;
       drawn.z += (citizen.position.z - drawn.z) * ease;
       drawn.heading = easeAngle(drawn.heading, citizen.heading, ease);
+      const wantsUmbrella = this.raining && citizen.activity !== 'Drive' ? 1 : 0;
+      drawn.umbrella +=
+        (wantsUmbrella - drawn.umbrella) * (1 - Math.exp(-deltaSeconds / UMBRELLA_SECONDS));
 
       this.pose(index, drawn);
     });
@@ -290,8 +299,10 @@ export class CitizenView {
       this.parts.bag.setMatrixAt(index, this.hidden);
     }
 
-    if (this.raining && citizen.activity !== 'Drive') {
-      // Held in the right hand, the arm out and up, the canopy over the head.
+    const open = drawn.umbrella;
+    if (open > 0.02) {
+      // Held in the right hand, the arm out and up, the canopy over the head;
+      // the canopy unfurls from a furled point as the arm comes up.
       const handX = TORSO_WIDTH / 2 + ARM_RADIUS + 0.02;
       this.parts.rightArm.setMatrixAt(
         index,
@@ -300,13 +311,14 @@ export class CitizenView {
           .multiply(
             new Matrix4().compose(
               new Vector3(handX, SHOULDER_HEIGHT, 0),
-              new Quaternion().setFromEuler(this.scratch.rotation.set(-2.4, 0, -0.35)),
+              new Quaternion().setFromEuler(
+                this.scratch.rotation.set(-2.4 * open, 0, -0.35 * open),
+              ),
               new Vector3(1, 1, 1),
             ),
           ),
       );
       const stickHeight = UMBRELLA_CANOPY_Y - (SHOULDER_HEIGHT - 0.2);
-      place('umbrellaStick', handX + 0.08, SHOULDER_HEIGHT - 0.2 + stickHeight / 2, 0.16);
       this.parts.umbrellaStick.setMatrixAt(
         index,
         base
@@ -319,7 +331,18 @@ export class CitizenView {
             ),
           ),
       );
-      place('umbrellaCanopy', handX + 0.08, UMBRELLA_CANOPY_Y, 0.16);
+      this.parts.umbrellaCanopy.setMatrixAt(
+        index,
+        base
+          .clone()
+          .multiply(
+            new Matrix4().compose(
+              new Vector3(handX + 0.08, UMBRELLA_CANOPY_Y, 0.16),
+              new Quaternion(),
+              new Vector3(0.12 + 0.88 * open, 1, 0.12 + 0.88 * open),
+            ),
+          ),
+      );
     } else {
       this.parts.umbrellaStick.setMatrixAt(index, this.hidden);
       this.parts.umbrellaCanopy.setMatrixAt(index, this.hidden);

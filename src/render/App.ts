@@ -114,6 +114,27 @@ const DRY_OUT_SECONDS = 6;
  */
 const FOLLOW_DISTANCE = 30;
 const FOLLOW_PITCH = (32 * Math.PI) / 180;
+/** When the citizen is indoors the camera backs off by this much, to show the building. */
+const FOLLOW_INDOORS_REACH = 2.1;
+const FOLLOW_REACH_EASE_SECONDS = 0.9;
+
+/** The camera never goes below the ground by this margin, however it is dragged. */
+const CAMERA_GROUND_CLEARANCE = 2.5;
+
+/**
+ * Quality tiers for weaker devices (PHASES.md Phase 7): the pixel ratio
+ * cap, the shadow map, and how much of the rain is drawn. There is no
+ * post-processing pass to turn off; tone mapping is in the materials.
+ */
+export type Quality = 'high' | 'medium' | 'low';
+const QUALITY: Record<Quality, { pixelRatio: number; shadowMap: number; rain: number }> = {
+  high: { pixelRatio: 2, shadowMap: 2048, rain: 1 },
+  medium: { pixelRatio: 1.5, shadowMap: 1024, rain: 0.5 },
+  low: { pixelRatio: 1, shadowMap: 0, rain: 0.25 },
+};
+/** Frames measured before judging the tier, and the frame time that drops it. */
+const QUALITY_SAMPLE_FRAMES = 90;
+const QUALITY_SLOW_MS = 24;
 const FOLLOW_EASE_SECONDS = 0.22;
 const FLIGHT_SECONDS = 1.4;
 const FOLLOW_LOOK_HEIGHT = 1.2;
@@ -186,7 +207,13 @@ export class App {
   /** The citizen the camera follows, if any (SPEC.md 2.9). */
   private followingId: string | undefined;
   private readonly followPoint = new Vector3();
+  private followReach = 1;
+  private appliedReach = 1;
   private flight: Flight | undefined;
+  private qualityTier: Quality = 'high';
+  private qualityFrames = 0;
+  private qualitySlowFrames = 0;
+  private qualityDrops = 0;
   private readonly frameListeners: Array<() => void> = [];
   /** A pointer or wheel is held on the controls right now. */
   private pointerDown = false;
@@ -197,7 +224,11 @@ export class App {
     this.scheduler = new TickScheduler(DEFAULT_SPEED);
 
     this.renderer = new WebGLRenderer({ antialias: true });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    // A phone starts one tier down and the first frames decide the rest.
+    this.qualityTier = navigator.maxTouchPoints > 0 && this.aspectRatio() < 1 ? 'medium' : 'high';
+    this.renderer.setPixelRatio(
+      Math.min(window.devicePixelRatio, QUALITY[this.qualityTier].pixelRatio),
+    );
     this.renderer.setSize(container.clientWidth, container.clientHeight);
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = PCFSoftShadowMap;
@@ -213,6 +244,7 @@ export class App {
     this.vehicleView = new VehicleView(world);
     this.rain = new Rain(this.aspectRatio() < 1);
     this.scene.add(this.rain.root);
+    this.applyQuality(this.qualityTier);
     this.scene.add(this.scenery.root);
     this.scene.add(this.townView.root);
     this.scene.add(this.wildlife.root);
@@ -420,6 +452,7 @@ export class App {
     this.animationFrame = requestAnimationFrame(this.frame);
 
     const deltaSeconds = this.clock.getDelta();
+    this.judgeQuality(deltaSeconds);
     this.world.tickMany(this.scheduler.ticksForFrame(deltaSeconds));
 
     // The picture eases towards the weather over a couple of real seconds;
@@ -462,6 +495,7 @@ export class App {
       this.placeDefaultCamera();
     }
     this.controls.update();
+    this.keepAboveGround();
     this.renderer.render(this.scene, this.camera);
 
     for (const listener of this.frameListeners) {
@@ -547,6 +581,8 @@ export class App {
       groundHeight(target.position.x, target.position.z) + FOLLOW_LOOK_HEIGHT,
       target.position.z,
     );
+    this.followReach = target.mode === 'indoors' ? FOLLOW_INDOORS_REACH : 1;
+    this.appliedReach = this.followReach;
     // Keep the viewer's bearing; come down to a good height and distance.
     const bearing = this.camera.position.clone().sub(this.controls.target);
     const yaw = Math.atan2(bearing.x, bearing.z);
@@ -554,7 +590,7 @@ export class App {
       Math.sin(yaw) * Math.cos(FOLLOW_PITCH),
       Math.sin(FOLLOW_PITCH),
       Math.cos(yaw) * Math.cos(FOLLOW_PITCH),
-    ).multiplyScalar(FOLLOW_DISTANCE);
+    ).multiplyScalar(FOLLOW_DISTANCE * this.followReach);
     this.startFlight(
       () => ({ position: this.followPoint.clone().add(offset), target: this.followPoint.clone() }),
       () => undefined,
@@ -627,14 +663,87 @@ export class App {
       target.position.z,
     );
     this.followPoint.lerp(wanted, 1 - Math.exp(-deltaSeconds / FOLLOW_EASE_SECONDS));
+    // Indoors the camera backs off to take in the building; the change is
+    // eased so a door is never a cut.
+    const reach = target.mode === 'indoors' ? FOLLOW_INDOORS_REACH : 1;
+    this.followReach +=
+      (reach - this.followReach) * (1 - Math.exp(-deltaSeconds / FOLLOW_REACH_EASE_SECONDS));
   }
 
-  /** Keeps the camera on the followed citizen, leaving the viewer their orbit. */
+  /**
+   * Keeps the camera on the followed citizen, leaving the viewer their orbit
+   * and scaling their distance by the reach.
+   */
   private trackFollowed(deltaSeconds: number): void {
     this.easeFollowPoint(deltaSeconds);
-    const delta = this.followPoint.clone().sub(this.controls.target);
-    this.camera.position.add(delta);
+    const offset = this.camera.position.clone().sub(this.controls.target);
+    offset.multiplyScalar(this.followReach / this.appliedReach);
+    this.appliedReach = this.followReach;
     this.controls.target.copy(this.followPoint);
+    this.camera.position.copy(this.followPoint).add(offset);
+  }
+
+  // --- Quality (PHASES.md Phase 7) -----------------------------------------
+
+  get quality(): Quality {
+    return this.qualityTier;
+  }
+
+  /** Applies a tier: pixel ratio, shadows and rain. Safe to call at any time. */
+  setQuality(tier: Quality): void {
+    this.qualityTier = tier;
+    this.applyQuality(tier);
+  }
+
+  private applyQuality(tier: Quality): void {
+    const settings = QUALITY[tier];
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, settings.pixelRatio));
+    this.renderer.setSize(this.container.clientWidth, this.container.clientHeight);
+    this.environment.setShadowMap(settings.shadowMap);
+    this.rain.setBudget(settings.rain);
+  }
+
+  /**
+   * The first frames judge the device: if most of them are slow, drop a
+   * tier and judge again, at most twice. Measured on the frame's own time,
+   * so a paused tab or a long first frame does not count.
+   */
+  private judgeQuality(deltaSeconds: number): void {
+    if (this.qualityDrops >= 2 || this.qualityFrames > QUALITY_SAMPLE_FRAMES * 3) {
+      return;
+    }
+    this.qualityFrames += 1;
+    // The first frames compile shaders and fill caches; ignore them.
+    if (this.qualityFrames <= 20) {
+      return;
+    }
+    if (deltaSeconds * 1000 > QUALITY_SLOW_MS) {
+      this.qualitySlowFrames += 1;
+    }
+    if (this.qualityFrames - 20 >= QUALITY_SAMPLE_FRAMES) {
+      const slow = this.qualitySlowFrames / QUALITY_SAMPLE_FRAMES;
+      if (slow > 0.5 && this.qualityTier !== 'low') {
+        this.setQuality(this.qualityTier === 'high' ? 'medium' : 'low');
+        this.qualityDrops += 1;
+      } else {
+        this.qualityDrops = 2;
+      }
+      this.qualityFrames = 20;
+      this.qualitySlowFrames = 0;
+    }
+  }
+
+  /** However the camera is dragged or panned, it stays above the hills. */
+  private keepAboveGround(): void {
+    const floor =
+      groundHeight(this.camera.position.x, this.camera.position.z) + CAMERA_GROUND_CLEARANCE;
+    if (this.camera.position.y < floor) {
+      this.camera.position.y = floor;
+    }
+    const targetFloor = groundHeight(this.controls.target.x, this.controls.target.z) + 0.5;
+    if (this.controls.target.y < targetFloor) {
+      this.controls.target.y = targetFloor;
+    }
   }
 
   private readonly handleResize = (): void => {
@@ -646,13 +755,16 @@ export class App {
     if (wasPortrait !== this.camera.aspect < 1 && !this.followingId) {
       this.frameTown();
     }
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    this.renderer.setPixelRatio(
+      Math.min(window.devicePixelRatio, QUALITY[this.qualityTier].pixelRatio),
+    );
     this.renderer.setSize(this.container.clientWidth, this.container.clientHeight);
   };
 
   /**
    * Hidden power-user keys, not shown anywhere in the UI: 1, 2, 3 and 4 for
-   * the four speeds, space to pause, S, C and R for the weather.
+   * the four speeds, space to pause, S, C and R for the weather, Q to cycle
+   * the quality tier.
    */
   private readonly handleKeyDown = (event: KeyboardEvent): void => {
     if (event.code === 'Space') {
@@ -667,6 +779,10 @@ export class App {
     const weather = WEATHER_KEYS[event.code];
     if (weather !== undefined) {
       this.world.setWeather(weather);
+    }
+    if (event.code === 'KeyQ') {
+      const tiers: Quality[] = ['high', 'medium', 'low'];
+      this.setQuality(tiers[(tiers.indexOf(this.qualityTier) + 1) % tiers.length]);
     }
   };
 

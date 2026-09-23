@@ -685,7 +685,10 @@ export class CitizenSystem {
       citizen.position = { ...doorPosition(getBuilding(appointment.place.id)) };
     }
 
-    if (appointment.activity === 'Work' && appointment.due !== undefined) {
+    // The town opens on Day 1 at 05:30, in the middle of the bakers' first
+    // shift, so nobody can be late that day: the diary would otherwise open
+    // on a row of "got to the bakery forty minutes late".
+    if (appointment.activity === 'Work' && appointment.due !== undefined && day > 1) {
       const late = minute - appointment.due - LATE_GRACE_MINUTES;
       if (late > 0) {
         citizen.lateToday = late;
