@@ -1,5 +1,41 @@
 # Changelog
 
+## Phase 5 — Weather and behavioural effects
+
+Weather that changes what the citizens do, not just how the town looks (SPEC 2.8).
+
+- `simulation/WeatherSystem.ts`: Sunny, Cloudy, Rain, set at once from outside and
+  written into the diary as one line ("Rain set in over the town at 09:30."). The weather
+  is in the state hash, and the determinism test now scripts five changes into its run
+  at fixed ticks, so the same seed still gives the same world at 1x and 100x.
+- The rain rules in `CitizenSystem`. Anyone with an outdoor preference under 80 gives
+  up the park and the break outside when it rains: the sociable (social 45 and over) go
+  to the cafe terrace instead, the rest go home, and workers on a break go straight back
+  in. It applies to people already there, to people on their way (they turn round), and
+  to appointments that fall due later in the rain. Car owners take the car even for a
+  short hop. A whim to go out needs more restlessness. The hardy stay on, under an
+  umbrella, and the diary says so.
+- The diary. Rain decisions taken in the same tick are written as one sentence
+  ("Because of the rain, Clara, June and Sam gave up on the park and went to the cafe
+  instead."); after the first two rain lines of a day the rest are colour, so a wet
+  morning does not crowd out the afternoon. Two people the rain sent to the cafe who
+  meet there get the line the author asked for: "June and Sam, both driven in by the
+  rain, got talking on the cafe terrace." A rainy day's diary is in
+  `docs/phase-5-eventlog-rainy-day6.txt`.
+- The look. Overcast greys and darkens the sky, the haze, the ambient and the sun, thins
+  the shadows, thickens the cloud layer and hides the stars and the moon; rain brings
+  the haze in a little. Rain streaks fall in a box around the camera target as one
+  instanced mesh (1,600 on desktop, 550 in portrait). The ground, roads and paving go
+  darker and glossier as they get wet, and the lamps pool wider; the town dries out over
+  six seconds after the rain stops. Everyone outside opens an umbrella held in the
+  right hand, in one of six colours, with an umbrella icon over the head that hides at
+  20x and 100x. The picture eases between weathers over about two seconds.
+- Keys until the UI arrives: S, C and R for Sunny, Cloudy and Rain.
+- Tests: rain at 10:00 leaves 4 people in the open where the control run has 12 thirty
+  minutes later; a month with rain every third day writes the causal lines and the cafe
+  meeting, keeps everyone moving and on the map; determinism holds with the weather
+  scripted in. Draw calls 86 in the rain (85 dry) at 1x and 5x; p95 18.7 ms.
+
 ## Phase 4.8 — Country and wildlife
 
 The author saw the dry ground outside the town read as desert (SPEC 2.14, decision 30;

@@ -391,6 +391,10 @@ export class Environment {
   private readonly hemisphere: HemisphereLight;
   private readonly skyMaterial: ShaderMaterial;
   private readonly fog: Fog;
+  private fogNear = 170;
+  private fogFar = 340;
+  private cloud = 0;
+  private rain = 0;
 
   private readonly skyTop = new Color();
   private readonly skyHorizon = new Color();
@@ -479,8 +483,18 @@ export class Environment {
    * narrow screen, so the range follows the framing rather than being fixed.
    */
   setFogRange(near: number, far: number): void {
-    this.fog.near = near;
-    this.fog.far = far;
+    this.fogNear = near;
+    this.fogFar = far;
+  }
+
+  /**
+   * How overcast and how wet the picture is, 0 to 1 each, eased by the
+   * caller over the transition (SPEC.md 2.8). Cloud greys and darkens the
+   * sky and the light and thickens the cloud layer; rain brings the haze in.
+   */
+  setWeather(cloud: number, rain: number): void {
+    this.cloud = cloud;
+    this.rain = rain;
   }
 
   /**
@@ -491,6 +505,7 @@ export class Environment {
   update(minuteOfDay: number, elapsedSeconds = 0): void {
     const palette = paletteAt(minuteOfDay);
     const uniforms = this.skyMaterial.uniforms;
+    const { cloud, rain } = this;
 
     this.skyTop.setHex(palette.skyTop);
     this.skyHorizon.setHex(palette.skyHorizon);
@@ -499,16 +514,26 @@ export class Environment {
     this.ambientGround.setHex(palette.ambientGround);
     this.sunColor.setHex(palette.sunColor);
 
+    // Overcast: the sky loses its colour and a little of its light; the
+    // horizon and the haze go the same grey, so the join stays invisible.
+    overcast(this.skyTop, cloud, 0.28 + 0.1 * rain);
+    overcast(this.skyHorizon, cloud, 0.14 + 0.08 * rain);
+    overcast(this.fogColor, cloud, 0.14 + 0.08 * rain);
+    overcast(this.ambientSky, cloud, 0.12);
+    overcast(this.sunColor, cloud, 0.1);
+    this.fog.near = this.fogNear * (1 - 0.25 * rain);
+    this.fog.far = this.fogFar * (1 - 0.18 * rain);
+
     (uniforms.topColor.value as Color).copy(this.skyTop);
     (uniforms.horizonColor.value as Color).copy(this.skyHorizon);
     this.fog.color.copy(this.fogColor);
 
     this.hemisphere.color.copy(this.ambientSky);
     this.hemisphere.groundColor.copy(this.ambientGround);
-    this.hemisphere.intensity = palette.ambientIntensity;
+    this.hemisphere.intensity = palette.ambientIntensity * (1 - 0.15 * cloud);
 
     this.sun.color.copy(this.sunColor);
-    this.sun.intensity = palette.sunIntensity;
+    this.sun.intensity = palette.sunIntensity * (1 - 0.55 * cloud - 0.15 * rain);
 
     const { azimuth, elevation } = sunAngles(minuteOfDay);
 
@@ -516,6 +541,7 @@ export class Environment {
     // scratches across the grass rather than as light. Fade them out instead.
     this.sun.shadow.intensity =
       SHADOW_STRENGTH *
+      (1 - 0.75 * cloud) *
       smoothStep(Math.min(1, Math.max(0, (elevation - MIN_SUN_ELEVATION) / SHADOW_FADE_ELEVATION)));
 
     const sunDirection = directionFrom(azimuth, elevation);
@@ -534,10 +560,12 @@ export class Environment {
 
     (uniforms.sunDirection.value as Vector3).copy(sunDirection);
     (uniforms.sunColor.value as Color).copy(this.sunColor);
-    uniforms.sunStrength.value = palette.sunStrength;
+    uniforms.sunStrength.value = palette.sunStrength * (1 - 0.9 * cloud);
+    uniforms.cloudCover.value = 0.45 + 0.7 * cloud;
+    (uniforms.cloudLit.value as Color).lerp(uniforms.cloudShade.value as Color, cloud * 0.55);
     (uniforms.moonDirection.value as Vector3).copy(moonDirection);
-    uniforms.moonStrength.value = palette.moonStrength;
-    uniforms.starStrength.value = palette.starStrength;
+    uniforms.moonStrength.value = palette.moonStrength * (1 - 0.8 * cloud);
+    uniforms.starStrength.value = palette.starStrength * (1 - 0.85 * cloud);
     (uniforms.cloudLit.value as Color).setHex(palette.cloudLit);
     (uniforms.cloudShade.value as Color).setHex(palette.cloudShade);
     uniforms.time.value = elapsedSeconds;
@@ -548,12 +576,25 @@ export class Environment {
     const moonlit = palette.moonStrength > palette.sunStrength;
     state.lightDirection.copy(moonlit ? moonDirection : sunDirection);
     state.lightColor.setHex(moonlit ? 0xc9d3ea : palette.sunColor);
-    state.glintStrength = moonlit ? palette.moonStrength * 0.4 : palette.sunStrength;
+    state.glintStrength =
+      (moonlit ? palette.moonStrength * 0.4 : palette.sunStrength) * (1 - cloud);
     state.seaDeep.setHex(palette.seaDeep);
     state.seaShallow.setHex(palette.seaShallow);
+    overcast(state.seaDeep, cloud, 0.15);
+    overcast(state.seaShallow, cloud, 0.15);
     state.seaGlint.setHex(palette.seaGlint);
     state.horizon.copy(this.skyHorizon);
   }
+}
+
+/** Greys a colour towards its own luminance and darkens it, by `amount`. */
+function overcast(color: Color, amount: number, darken: number): void {
+  if (amount <= 0) {
+    return;
+  }
+  const luminance = 0.3 * color.r + 0.59 * color.g + 0.11 * color.b;
+  color.lerp(new Color(luminance, luminance, luminance), amount * 0.8);
+  color.multiplyScalar(1 - darken * amount);
 }
 
 /** A unit vector from an azimuth (from +X towards +Z) and an elevation. */

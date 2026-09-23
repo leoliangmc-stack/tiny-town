@@ -192,6 +192,9 @@ export class TownView {
   private readonly buildingLights: BuildingLights[] = [];
 
   private readonly matteWhite = matte(0xffffff);
+  /** The ground plane and the flat slabs on it, which go dark and glossy in the rain. */
+  private readonly groundMaterial = matte(0xffffff);
+  private readonly slabMaterial = matte(0xffffff);
   /** Pale stone with white joints, in world space so slabs of any size tile alike. */
   private readonly stoneMaterial = makeStoneMaterial();
   private readonly leafMaterial = new MeshStandardMaterial({
@@ -210,6 +213,7 @@ export class TownView {
   private readonly lampHaloBillboards: Billboard[] = [];
   private readonly lastCameraQuaternion = new Quaternion(0, 0, 0, 0);
   private lampLit = 0;
+  private wet = 0;
 
   /** The lighthouse beam: the one light in the night that moves. */
   private readonly beam: Mesh;
@@ -298,7 +302,7 @@ export class TownView {
     };
 
     // Ground plane pieces: roads, patches, paths, markings.
-    define('slab', flatUnitPlane(), this.matteWhite, { receiveShadow: true });
+    define('slab', flatUnitPlane(), this.slabMaterial, { receiveShadow: true });
     // Stone paving with white joints: pavements, lanes and the square.
     define('stone', flatUnitPlane(), this.stoneMaterial, { receiveShadow: true });
     define('stoneBox', new BoxGeometry(1, 1, 1), this.stoneMaterial, shadow);
@@ -351,7 +355,7 @@ export class TownView {
   private addGround(): void {
     // A faint blotch of two greens keeps the grass from reading as one flat
     // fill, which is the surest sign of a machine-made scene (DESIGN.md §16).
-    const material = matte(0xffffff);
+    const material = this.groundMaterial;
     material.map = grassTexture();
     material.vertexColors = true;
     // A heightfield: the plane is laid flat, then every vertex is lifted to
@@ -1761,6 +1765,22 @@ export class TownView {
   }
 
   /**
+   * How wet the town looks, 0 to 1 (SPEC.md 2.8): the ground, the roads and
+   * the paving go darker and glossier, so the sky and the lamps show in them.
+   */
+  setWetness(wet: number): void {
+    for (const material of [this.groundMaterial, this.slabMaterial, this.stoneMaterial]) {
+      material.roughness = 0.95 - 0.8 * wet;
+      material.metalness = 0.28 * wet;
+    }
+    const shade = 1 - 0.35 * wet;
+    this.groundMaterial.color.setScalar(shade);
+    this.slabMaterial.color.setScalar(shade);
+    this.stoneMaterial.color.setHex(COLOR.pavement).multiplyScalar(1 - 0.35 * wet);
+    this.wet = wet;
+  }
+
+  /**
    * Eases every light towards where the simulation says it should be, and
    * turns the glow quads to face the camera.
    *
@@ -1811,7 +1831,8 @@ export class TownView {
 
     this.lampLit += (environment.lampFactor - this.lampLit) * ease;
     this.lampMaterial.emissiveIntensity = this.lampLit * 1.5;
-    this.lampPoolMaterial.opacity = this.lampLit * 0.3;
+    // Lamps pool wider on a wet street.
+    this.lampPoolMaterial.opacity = this.lampLit * (0.3 + 0.25 * this.wet);
     this.lampHaloMaterial.opacity = this.lampLit * 0.36;
 
     // The beam sweeps on real time: at 20x the town sees a slow pulse.

@@ -11,6 +11,7 @@ import { buildRoadGraph, NavGraph } from './Navigation.js';
 import { Rng } from './Rng.js';
 import { TimeSystem } from './TimeSystem.js';
 import { VehicleSystem } from './VehicleSystem.js';
+import { type Weather, WeatherSystem } from './WeatherSystem.js';
 
 /** Where a follower should look: the citizen on foot, in a car, or indoors. */
 export interface FollowTarget {
@@ -49,6 +50,7 @@ export class World {
   readonly time = new TimeSystem();
   readonly citizenSystem: CitizenSystem;
   readonly vehicleSystem: VehicleSystem;
+  readonly weather = new WeatherSystem();
   readonly roads: NavGraph;
 
   constructor(options: WorldOptions = {}) {
@@ -62,6 +64,11 @@ export class World {
 
   get vehicles(): readonly Vehicle[] {
     return this.vehicleSystem.vehicles;
+  }
+
+  /** Changes the weather at once (SPEC.md 2.8); the citizens react from the next tick. */
+  setWeather(weather: Weather): void {
+    this.weather.set(weather, this.log, this.time.day, this.time.minuteOfDay);
   }
 
   /**
@@ -138,7 +145,7 @@ export class World {
     this.time.tick();
     // Vehicles move first, so a citizen aboard mirrors this tick's position.
     this.vehicleSystem.tick(this.time.minuteOfDay);
-    this.citizenSystem.tick(this.time.day, this.time.minuteOfDay);
+    this.citizenSystem.tick(this.time.day, this.time.minuteOfDay, this.weather.current);
   }
 
   /** Runs a number of ticks in a row. */
@@ -156,6 +163,7 @@ export class World {
   stateHash(): string {
     const snapshot = JSON.stringify({
       tick: this.time.totalTicks,
+      weather: this.weather.current,
       citizens: this.citizens.map((citizen) => ({
         ...citizen,
         // Round so the hash is about state, not about the last bit of a float.

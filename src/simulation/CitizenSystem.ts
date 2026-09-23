@@ -8,8 +8,14 @@ import { getBuilding, getZone, type OutdoorZone } from '../world/Town.js';
 import { GAME_MINUTES_PER_TICK } from './constants.js';
 import { clockWords, EventLog, minutesInWords } from './EventLog.js';
 import { buildSidewalkGraph, entranceNodeId, NavGraph } from './Navigation.js';
-import { LATE_GRACE_MINUTES, ScheduleSystem } from './ScheduleSystem.js';
+import {
+  CAFE_ZONE_ID,
+  LATE_GRACE_MINUTES,
+  PARK_ZONE_ID,
+  ScheduleSystem,
+} from './ScheduleSystem.js';
 import { VehicleSystem } from './VehicleSystem.js';
+import type { Weather } from './WeatherSystem.js';
 
 /** How each outdoor zone reads in a sentence. */
 const ZONE_PHRASES: Record<string, string> = {
@@ -35,6 +41,17 @@ const WHIM_FROM = 10 * 60;
 const WHIM_UNTIL = 20 * 60 + 30;
 
 /**
+ * The rain rules (SPEC.md 2.8). Somebody this fond of the outdoors keeps to
+ * their plans in the rain, under an umbrella; everybody else gives up the
+ * park and the break outside. Of those, the sociable go to the cafe terrace
+ * instead, which is under an awning and where they meet each other; the
+ * rest go home. A whim to go out needs a little more restlessness in the rain.
+ */
+const RAIN_HARDY_OUTDOOR = 80;
+const RAIN_CAFE_SOCIAL = 45;
+const RAIN_WHIM_EXTRA = 15;
+
+/**
  * Moves the citizens through their days (SPEC.md 2.4).
  *
  * Each morning the ScheduleSystem hands every citizen a list of appointments.
@@ -58,6 +75,16 @@ export class CitizenSystem {
   private everyoneAsleepLogged = false;
   /** Who has already had a meeting written up today, to keep the diary fresh. */
   private metToday = new Set<string>();
+
+  private weather: Weather = 'Sunny';
+  /** Who has already decided what to do about today's rain, so nobody dithers. */
+  private shelteredToday = new Set<string>();
+  /** Who is at the cafe because the rain sent them there, for the diary. */
+  private rainedInToday = new Set<string>();
+  /** This tick's rain decisions, written up together so the diary reads as prose. */
+  private rainNotes: Array<{ name: string; kind: RainNote }> = [];
+  /** How many rain lines the diary has had today; after a couple they become colour. */
+  private rainLinesToday = 0;
 
   /** Set by the World once the road graph exists; citizens walk until then. */
   vehicles: VehicleSystem | undefined;
@@ -96,9 +123,27 @@ export class CitizenSystem {
     return this.citizens.filter((citizen) => citizen.place.kind !== 'building').length;
   }
 
-  tick(day: number, minuteOfDay: number): void {
+  /**
+   * Citizens in the open: outside, on foot, and not under the cafe's awning.
+   * This is what the rain is measured against (SPEC.md 2.8).
+   */
+  get inTheOpenCount(): number {
+    return this.citizens.filter(
+      (citizen) =>
+        citizen.place.kind !== 'building' &&
+        citizen.activity !== 'Drive' &&
+        !(citizen.place.kind === 'zone' && citizen.place.id === CAFE_ZONE_ID),
+    ).length;
+  }
+
+  tick(day: number, minuteOfDay: number, weather: Weather = 'Sunny'): void {
     if (this.citizens[0].planDay !== day) {
       this.startDay(day);
+    }
+    if (weather !== this.weather) {
+      this.weather = weather;
+      // A change of weather is a fresh question for everyone outside.
+      this.shelteredToday.clear();
     }
 
     for (const citizen of this.citizens) {
@@ -108,7 +153,70 @@ export class CitizenSystem {
       this.ride(citizen, day, minuteOfDay);
     }
 
+    this.flushRainNotes(day, minuteOfDay);
     this.noteLastLightOut(day, minuteOfDay);
+  }
+
+  /**
+   * One sentence per kind of decision, however many people made it at once:
+   * "Because of the rain, Clara, June and Sam gave up on the park and went
+   * to the cafe instead." rather than the same line six times.
+   */
+  private flushRainNotes(day: number, minute: number): void {
+    if (this.rainNotes.length === 0) {
+      return;
+    }
+    for (const kind of ['cafe', 'skip-cafe', 'home', 'skip-home', 'inside'] as const) {
+      const names = this.rainNotes.filter((note) => note.kind === kind).map((note) => note.name);
+      if (names.length === 0) {
+        continue;
+      }
+      const who = listNames(names);
+      const plural = names.length > 1;
+      // The first couple of rain lines a day are milestones; the rest are
+      // colour, so a wet morning does not crowd everything else out.
+      const priority = this.rainLinesToday < 2 ? 'milestone' : 'colour';
+      if (kind === 'cafe') {
+        this.rainLinesToday += 1;
+        this.log.record(
+          day,
+          minute,
+          `Because of the rain, ${who} gave up on the park and went to the cafe instead.`,
+          priority,
+        );
+      } else if (kind === 'skip-cafe') {
+        this.rainLinesToday += 1;
+        this.log.record(
+          day,
+          minute,
+          `Because of the rain, ${who} skipped the park and went to the cafe instead.`,
+          priority,
+        );
+      } else if (kind === 'home') {
+        this.rainLinesToday += 1;
+        this.log.record(
+          day,
+          minute,
+          `Because of the rain, ${who} gave up on the park and went home.`,
+          priority,
+        );
+      } else if (kind === 'skip-home') {
+        this.log.record(
+          day,
+          minute,
+          `${who} thought better of the park in the rain and stayed in.`,
+          'colour',
+        );
+      } else {
+        this.log.record(
+          day,
+          minute,
+          `The rain sent ${who} back inside before the break was ${plural ? 'over' : 'up'}.`,
+          'colour',
+        );
+      }
+    }
+    this.rainNotes = [];
   }
 
   private startDay(day: number): void {
@@ -121,6 +229,9 @@ export class CitizenSystem {
     this.anyoneUpToday = false;
     this.everyoneAsleepLogged = false;
     this.metToday.clear();
+    this.shelteredToday.clear();
+    this.rainedInToday.clear();
+    this.rainLinesToday = 0;
   }
 
   private updateSocialNeed(citizen: Citizen): void {
@@ -137,6 +248,11 @@ export class CitizenSystem {
 
   /** Starts whatever is due: the next appointment, a whim, or a fallback. */
   private advance(citizen: Citizen, day: number, minute: number): void {
+    // Rain is a question for people on their way somewhere too, so it is
+    // asked before a walker is left to walk.
+    if (this.weather === 'Rain' && this.shelterFromRain(citizen, day, minute)) {
+      return;
+    }
     if (
       citizen.activity === 'Walk' ||
       citizen.activity === 'GoHome' ||
@@ -153,7 +269,10 @@ export class CitizenSystem {
 
     if (next && next.at <= minute && free) {
       citizen.planIndex += 1;
-      this.begin(citizen, next, day, minute);
+      const changed = this.weather === 'Rain' ? this.rainInstead(citizen, next) : next;
+      if (changed) {
+        this.begin(citizen, changed, day, minute);
+      }
       return;
     }
 
@@ -180,7 +299,8 @@ export class CitizenSystem {
   }
 
   private wantsToGoOut(citizen: Citizen, minute: number): boolean {
-    if (citizen.socialNeed < SOCIAL_NEED_THRESHOLD || citizen.age < 16) {
+    const threshold = SOCIAL_NEED_THRESHOLD + (this.weather === 'Rain' ? RAIN_WHIM_EXTRA : 0);
+    if (citizen.socialNeed < threshold || citizen.age < 16) {
       return false;
     }
     if (citizen.activity !== 'Relax' || citizen.place.id !== citizen.homeId) {
@@ -191,6 +311,185 @@ export class CitizenSystem {
     }
     const next = citizen.plan[citizen.planIndex];
     return !next || next.at - minute > 60;
+  }
+
+  /**
+   * What somebody already out of doors does when it rains (SPEC.md 2.8).
+   * Returns true when it changed their day. Asked once per citizen per
+   * spell of rain, so nobody is chased around by the same shower twice.
+   */
+  private shelterFromRain(citizen: Citizen, day: number, minute: number): boolean {
+    if (this.shelteredToday.has(citizen.id)) {
+      return false;
+    }
+    if (citizen.activity === 'Walk' && citizen.pending && !citizen.tripStage) {
+      return this.turnBackFromRain(citizen, citizen.pending, day, minute);
+    }
+    if (citizen.place.kind !== 'zone' || citizen.activity === 'Work') {
+      return false;
+    }
+    this.shelteredToday.add(citizen.id);
+    const zoneId = citizen.place.id;
+    if (zoneId === CAFE_ZONE_ID) {
+      return false;
+    }
+    if (citizen.personality.outdoorPreference >= RAIN_HARDY_OUTDOOR) {
+      if (zoneId === PARK_ZONE_ID) {
+        this.log.record(
+          day,
+          minute,
+          `${citizen.name} stayed on in the park under an umbrella, rain or no rain.`,
+          'colour',
+        );
+      }
+      return false;
+    }
+
+    const onBreak = zoneId !== PARK_ZONE_ID;
+    if (onBreak && citizen.workplaceId) {
+      // Back inside early; the break is over.
+      this.rainNotes.push({ name: citizen.name, kind: 'inside' });
+      this.begin(
+        citizen,
+        {
+          at: minute,
+          activity: 'Work',
+          place: { kind: 'building', id: citizen.workplaceId },
+          duration: 0,
+        },
+        day,
+        minute,
+      );
+      return true;
+    }
+
+    if (citizen.personality.social >= RAIN_CAFE_SOCIAL && citizen.age >= 16) {
+      this.rainNotes.push({ name: citizen.name, kind: 'cafe' });
+      this.rainedInToday.add(citizen.id);
+      this.begin(
+        citizen,
+        {
+          at: minute,
+          activity: 'Socialize',
+          place: { kind: 'zone', id: CAFE_ZONE_ID },
+          duration: 25,
+        },
+        day,
+        minute,
+      );
+      return true;
+    }
+
+    this.rainNotes.push({ name: citizen.name, kind: 'home' });
+    this.begin(
+      citizen,
+      {
+        at: minute,
+        activity: 'Relax',
+        place: { kind: 'building', id: citizen.homeId },
+        duration: 0,
+      },
+      day,
+      minute,
+    );
+    return true;
+  }
+
+  /**
+   * Somebody on foot towards the park or a break outside when the rain
+   * starts turns round: the sociable for the cafe, the rest for home; a
+   * worker on the way to a break goes straight back in.
+   */
+  private turnBackFromRain(
+    citizen: Citizen,
+    pending: Appointment,
+    day: number,
+    minute: number,
+  ): boolean {
+    if (
+      pending.place.kind !== 'zone' ||
+      pending.place.id === CAFE_ZONE_ID ||
+      pending.activity === 'Work' ||
+      citizen.personality.outdoorPreference >= RAIN_HARDY_OUTDOOR
+    ) {
+      return false;
+    }
+    this.shelteredToday.add(citizen.id);
+    if (pending.place.id !== PARK_ZONE_ID && citizen.workplaceId) {
+      this.rainNotes.push({ name: citizen.name, kind: 'inside' });
+      this.begin(
+        citizen,
+        {
+          at: minute,
+          activity: 'Work',
+          place: { kind: 'building', id: citizen.workplaceId },
+          duration: 0,
+        },
+        day,
+        minute,
+      );
+      return true;
+    }
+    if (citizen.personality.social >= RAIN_CAFE_SOCIAL && citizen.age >= 16) {
+      this.rainNotes.push({ name: citizen.name, kind: 'cafe' });
+      this.rainedInToday.add(citizen.id);
+      this.begin(
+        citizen,
+        {
+          at: minute,
+          activity: 'Socialize',
+          place: { kind: 'zone', id: CAFE_ZONE_ID },
+          duration: 25,
+        },
+        day,
+        minute,
+      );
+      return true;
+    }
+    this.rainNotes.push({ name: citizen.name, kind: 'home' });
+    this.begin(
+      citizen,
+      {
+        at: minute,
+        activity: 'Relax',
+        place: { kind: 'building', id: citizen.homeId },
+        duration: 0,
+      },
+      day,
+      minute,
+    );
+    return true;
+  }
+
+  /**
+   * What becomes of an appointment that falls due in the rain: the park and
+   * the break outside are given up by all but the hardy, the sociable going
+   * to the cafe instead. Returns the appointment to begin, or nothing.
+   */
+  private rainInstead(citizen: Citizen, next: Appointment): Appointment | undefined {
+    if (next.place.kind !== 'zone' || next.place.id === CAFE_ZONE_ID || next.activity === 'Work') {
+      return next;
+    }
+    if (citizen.personality.outdoorPreference >= RAIN_HARDY_OUTDOOR) {
+      return next;
+    }
+    if (next.place.id !== PARK_ZONE_ID) {
+      // A break outside the workplace: taken indoors instead.
+      this.rainNotes.push({ name: citizen.name, kind: 'inside' });
+      return undefined;
+    }
+    if (citizen.personality.social >= RAIN_CAFE_SOCIAL && citizen.age >= 16) {
+      this.rainNotes.push({ name: citizen.name, kind: 'skip-cafe' });
+      this.rainedInToday.add(citizen.id);
+      return {
+        ...next,
+        activity: 'Socialize',
+        place: { kind: 'zone', id: CAFE_ZONE_ID },
+        duration: 25,
+      };
+    }
+    this.rainNotes.push({ name: citizen.name, kind: 'skip-home' });
+    return undefined;
   }
 
   /** Where the day goes once a timed activity ends and nothing is due. */
@@ -286,8 +585,12 @@ export class CitizenSystem {
       return undefined;
     }
     // A trip that ends where the car already stands (a building and its own
-    // outdoor zone, or a place just down the street) is walked.
-    if (this.vehicles.isParkedNear(vehicle, this.arrivalPoint(citizen, destination))) {
+    // outdoor zone, or a place just down the street) is walked, unless it is
+    // raining, when the car is taken even for a short hop (SPEC.md 2.8).
+    if (
+      this.weather !== 'Rain' &&
+      this.vehicles.isParkedNear(vehicle, this.arrivalPoint(citizen, destination))
+    ) {
       return undefined;
     }
     if (vehicle.workplaceId) {
@@ -430,6 +733,23 @@ export class CitizenSystem {
     this.metToday.add(other.id);
 
     const where = ZONE_PHRASES[zoneId] ?? 'in town';
+    if (this.rainedInToday.has(citizen.id) && this.rainedInToday.has(other.id)) {
+      this.log.record(
+        day,
+        minute,
+        `${citizen.name} and ${other.name}, both driven in by the rain, got talking ${where}.`,
+        'always',
+      );
+      return;
+    }
+    if (this.rainedInToday.has(citizen.id)) {
+      this.log.record(
+        day,
+        minute,
+        `${citizen.name}, in out of the rain, found ${other.name} ${where} and stayed to talk.`,
+      );
+      return;
+    }
     if (citizen.friends.includes(other.id)) {
       this.log.record(
         day,
@@ -586,6 +906,16 @@ export class CitizenSystem {
       this.arrive(citizen, citizen.pending, day, minute);
     }
   }
+}
+
+type RainNote = 'cafe' | 'skip-cafe' | 'home' | 'skip-home' | 'inside';
+
+/** "Ada", "Ada and Ben", "Ada, Ben and Clara". */
+function listNames(names: string[]): string {
+  if (names.length <= 1) {
+    return names[0] ?? '';
+  }
+  return `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
 }
 
 /** Three ways of saying somebody could not sit still, so the diary varies. */

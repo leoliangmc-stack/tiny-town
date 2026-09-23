@@ -1,4 +1,12 @@
 import {
+  SRGBColorSpace,
+  PlaneGeometry,
+  MeshBasicMaterial,
+  DoubleSide,
+  CylinderGeometry,
+  ConeGeometry,
+  CanvasTexture,
+  type Camera,
   CapsuleGeometry,
   Color,
   Group,
@@ -45,7 +53,27 @@ const BOB_HEIGHT = 0.035;
 const FOLLOW_SECONDS = 0.12;
 
 /** The parts every citizen is made of, each an instanced mesh. */
-type Part = 'head' | 'hair' | 'torso' | 'leftArm' | 'rightArm' | 'leftLeg' | 'rightLeg' | 'bag';
+type Part =
+  | 'head'
+  | 'hair'
+  | 'torso'
+  | 'leftArm'
+  | 'rightArm'
+  | 'leftLeg'
+  | 'rightLeg'
+  | 'bag'
+  | 'umbrellaStick'
+  | 'umbrellaCanopy'
+  | 'icon';
+
+/** The umbrella: a stick held in the right hand and a canopy above the head. */
+const UMBRELLA_RADIUS = 0.62;
+const UMBRELLA_CANOPY_Y = HEAD_CENTRE_Y + HEAD_RADIUS + 0.32;
+const UMBRELLA_COLORS = [0xc9705f, 0x3f7fb8, 0xd9a83e, 0x4e8a6a, 0xf5f0e6, 0x2b4c8c];
+
+/** The icon over the head (SPEC.md 2.8): v1 has the umbrella only. */
+const ICON_Y = UMBRELLA_CANOPY_Y + 0.75;
+const ICON_SIZE = 0.7;
 
 interface Drawn {
   citizen: Citizen;
@@ -71,16 +99,31 @@ export class CitizenView {
   private readonly drawn: Drawn[] = [];
   private readonly scratch = new Object3D();
   private readonly hidden = new Matrix4().makeScale(0, 0, 0);
+  private readonly iconMaterial: MeshBasicMaterial;
+  private readonly cameraQuaternion = new Quaternion();
   private elapsed = 0;
+  private raining = false;
+  private showIcons = false;
 
   constructor(world: World) {
     this.root.name = 'citizens';
     const count = world.citizens.length;
     const matte = new MeshStandardMaterial({ roughness: 0.95, metalness: 0 });
+    const canopy = new MeshStandardMaterial({ roughness: 0.8, metalness: 0, side: DoubleSide });
+    this.iconMaterial = new MeshBasicMaterial({
+      map: umbrellaIconTexture(),
+      transparent: true,
+      depthWrite: false,
+      opacity: 0,
+    });
 
-    const make = (geometry: InstancedMesh['geometry']): InstancedMesh => {
-      const mesh = new InstancedMesh(geometry, matte, count);
-      mesh.castShadow = true;
+    const make = (
+      geometry: InstancedMesh['geometry'],
+      material: MeshStandardMaterial | MeshBasicMaterial = matte,
+      castShadow = true,
+    ): InstancedMesh => {
+      const mesh = new InstancedMesh(geometry, material, count);
+      mesh.castShadow = castShadow;
       mesh.frustumCulled = false;
       this.root.add(mesh);
       return mesh;
@@ -95,6 +138,9 @@ export class CitizenView {
       leftLeg: make(limb(LEG_LENGTH, LEG_RADIUS)),
       rightLeg: make(limb(LEG_LENGTH, LEG_RADIUS)),
       bag: make(new RoundedBoxGeometry(BAG_SIZE, BAG_SIZE * 1.1, 0.14, 2, 0.04)),
+      umbrellaStick: make(new CylinderGeometry(0.02, 0.02, 1, 6)),
+      umbrellaCanopy: make(new ConeGeometry(UMBRELLA_RADIUS, 0.24, 10, 1, true), canopy),
+      icon: make(new PlaneGeometry(ICON_SIZE, ICON_SIZE), this.iconMaterial, false),
     };
 
     world.citizens.forEach((citizen, index) => {
@@ -114,6 +160,11 @@ export class CitizenView {
       this.parts.leftLeg.setColorAt(index, new Color(look.trousers));
       this.parts.rightLeg.setColorAt(index, new Color(look.trousers));
       this.parts.bag.setColorAt(index, new Color(0xd4b483));
+      this.parts.umbrellaStick.setColorAt(index, new Color(0x3f3d3a));
+      this.parts.umbrellaCanopy.setColorAt(
+        index,
+        new Color(UMBRELLA_COLORS[index % UMBRELLA_COLORS.length]),
+      );
     });
     for (const mesh of Object.values(this.parts)) {
       if (mesh.instanceColor) {
@@ -122,9 +173,17 @@ export class CitizenView {
     }
   }
 
-  update(deltaSeconds: number): void {
+  /**
+   * `raining` opens the umbrellas of everyone outside; `showIcons` puts the
+   * umbrella icon over their heads too, which the caller turns off at speed.
+   */
+  update(deltaSeconds: number, camera: Camera, raining = false, showIcons = false): void {
     this.elapsed += deltaSeconds;
     const ease = 1 - Math.exp(-deltaSeconds / FOLLOW_SECONDS);
+    this.raining = raining;
+    this.showIcons = showIcons && raining;
+    this.cameraQuaternion.copy(camera.quaternion);
+    this.iconMaterial.opacity = this.showIcons ? 0.92 : 0;
 
     this.drawn.forEach((drawn, index) => {
       const { citizen } = drawn;
@@ -230,6 +289,52 @@ export class CitizenView {
     } else {
       this.parts.bag.setMatrixAt(index, this.hidden);
     }
+
+    if (this.raining && citizen.activity !== 'Drive') {
+      // Held in the right hand, the arm out and up, the canopy over the head.
+      const handX = TORSO_WIDTH / 2 + ARM_RADIUS + 0.02;
+      this.parts.rightArm.setMatrixAt(
+        index,
+        base
+          .clone()
+          .multiply(
+            new Matrix4().compose(
+              new Vector3(handX, SHOULDER_HEIGHT, 0),
+              new Quaternion().setFromEuler(this.scratch.rotation.set(-2.4, 0, -0.35)),
+              new Vector3(1, 1, 1),
+            ),
+          ),
+      );
+      const stickHeight = UMBRELLA_CANOPY_Y - (SHOULDER_HEIGHT - 0.2);
+      place('umbrellaStick', handX + 0.08, SHOULDER_HEIGHT - 0.2 + stickHeight / 2, 0.16);
+      this.parts.umbrellaStick.setMatrixAt(
+        index,
+        base
+          .clone()
+          .multiply(
+            new Matrix4().compose(
+              new Vector3(handX + 0.08, SHOULDER_HEIGHT - 0.2 + stickHeight / 2, 0.16),
+              new Quaternion(),
+              new Vector3(1, stickHeight, 1),
+            ),
+          ),
+      );
+      place('umbrellaCanopy', handX + 0.08, UMBRELLA_CANOPY_Y, 0.16);
+    } else {
+      this.parts.umbrellaStick.setMatrixAt(index, this.hidden);
+      this.parts.umbrellaCanopy.setMatrixAt(index, this.hidden);
+    }
+
+    if (this.showIcons && citizen.activity !== 'Drive') {
+      // A billboard over the head, in world space so it never tilts with the body.
+      const top = new Vector3(0, ICON_Y * scale, 0).applyMatrix4(base);
+      this.parts.icon.setMatrixAt(
+        index,
+        new Matrix4().compose(top, this.cameraQuaternion, new Vector3(1, 1, 1)),
+      );
+    } else {
+      this.parts.icon.setMatrixAt(index, this.hidden);
+    }
   }
 
   /** The drawn object for a citizen, used by camera follow in Phase 6. */
@@ -243,6 +348,49 @@ export class CitizenView {
     anchor.position.set(x, groundHeight(x, z), z);
     return anchor;
   }
+}
+
+let sharedIconTexture: CanvasTexture | undefined;
+
+/** The umbrella glyph on a dark rounded disc, drawn once on a canvas. */
+function umbrellaIconTexture(): CanvasTexture {
+  if (sharedIconTexture) {
+    return sharedIconTexture;
+  }
+  const size = 128;
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const context = canvas.getContext('2d');
+  if (context) {
+    context.fillStyle = 'rgba(46, 48, 62, 0.88)';
+    context.beginPath();
+    context.arc(size / 2, size / 2, size / 2 - 4, 0, Math.PI * 2);
+    context.fill();
+    // The canopy: a half disc with a scalloped edge, and the handle below.
+    context.fillStyle = '#f5f0e6';
+    context.beginPath();
+    context.arc(size / 2, size * 0.52, size * 0.3, Math.PI, 0);
+    context.closePath();
+    context.fill();
+    context.fillStyle = 'rgba(46, 48, 62, 0.88)';
+    for (const dx of [-0.2, 0, 0.2]) {
+      context.beginPath();
+      context.arc(size / 2 + dx * size, size * 0.53, size * 0.06, 0, Math.PI * 2);
+      context.fill();
+    }
+    context.strokeStyle = '#f5f0e6';
+    context.lineWidth = 6;
+    context.lineCap = 'round';
+    context.beginPath();
+    context.moveTo(size / 2, size * 0.52);
+    context.lineTo(size / 2, size * 0.78);
+    context.arc(size / 2 - 7, size * 0.78, 7, 0, Math.PI);
+    context.stroke();
+  }
+  sharedIconTexture = new CanvasTexture(canvas);
+  sharedIconTexture.colorSpace = SRGBColorSpace;
+  return sharedIconTexture;
 }
 
 /** A limb hanging from its joint: the geometry is shifted so y=0 is the pivot. */

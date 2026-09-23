@@ -12,6 +12,7 @@ import {
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 
 import { DEFAULT_SPEED, type SpeedLevel } from '../simulation/constants.js';
+import type { Weather } from '../simulation/WeatherSystem.js';
 import { TickScheduler } from '../simulation/TickScheduler.js';
 import { World } from '../simulation/World.js';
 
@@ -21,6 +22,7 @@ import { townBounds } from '../world/Town.js';
 import { CitizenView } from './CitizenView.js';
 import { DebugView } from './DebugView.js';
 import { Environment } from './Environment.js';
+import { Rain } from './Rain.js';
 import { SUNRISE_MINUTE, SUNSET_MINUTE } from './palettes.js';
 import { Scenery } from './Scenery.js';
 import { TownView } from './TownView.js';
@@ -91,6 +93,18 @@ function debugRequested(): boolean {
   return new URLSearchParams(window.location.search).has('debug');
 }
 
+/** Weathers reachable from the keyboard while there is no UI yet (SPEC.md 2.8). */
+const WEATHER_KEYS: Record<string, Weather> = {
+  KeyS: 'Sunny',
+  KeyC: 'Cloudy',
+  KeyR: 'Rain',
+};
+
+/** How overcast each weather looks, and how long the picture takes to get there. */
+const CLOUD_AMOUNT: Record<Weather, number> = { Sunny: 0, Cloudy: 0.7, Rain: 1 };
+const WEATHER_EASE_SECONDS = 1.6;
+const DRY_OUT_SECONDS = 6;
+
 /** Speeds reachable from the keyboard while there is no UI yet. */
 const SPEED_KEYS: Record<string, SpeedLevel> = {
   Digit1: 1,
@@ -121,7 +135,12 @@ export class App {
   private readonly scenery = new Scenery();
   private readonly townView = new TownView();
   private readonly wildlife = new Wildlife();
+  private readonly rain: Rain;
   private readonly citizenView: CitizenView;
+  /** The eased picture of the weather: overcast, falling rain, wet ground. */
+  private cloudAmount = 0;
+  private rainAmount = 0;
+  private wetness = 0;
   private readonly vehicleView: VehicleView;
   private readonly debugView: DebugView | undefined;
 
@@ -159,6 +178,8 @@ export class App {
     this.frameTown();
     this.citizenView = new CitizenView(world);
     this.vehicleView = new VehicleView(world);
+    this.rain = new Rain(this.aspectRatio() < 1);
+    this.scene.add(this.rain.root);
     this.scene.add(this.scenery.root);
     this.scene.add(this.townView.root);
     this.scene.add(this.wildlife.root);
@@ -174,7 +195,7 @@ export class App {
     this.environment.update(world.time.minuteOfDay, 0);
     this.scenery.update(this.environment.state, 0, this.camera.position);
     this.townView.update(world, this.environment.state, 10, 0, this.camera);
-    this.citizenView.update(10);
+    this.citizenView.update(10, this.camera);
     this.vehicleView.update(this.environment.state, 10, this.camera);
 
     window.addEventListener('resize', this.handleResize);
@@ -357,6 +378,18 @@ export class App {
     const deltaSeconds = this.clock.getDelta();
     this.world.tickMany(this.scheduler.ticksForFrame(deltaSeconds));
 
+    // The picture eases towards the weather over a couple of real seconds;
+    // the ground dries out more slowly than it gets wet (SPEC.md 2.8).
+    const weather = this.world.weather.current;
+    const ease = 1 - Math.exp(-deltaSeconds / WEATHER_EASE_SECONDS);
+    this.cloudAmount += (CLOUD_AMOUNT[weather] - this.cloudAmount) * ease;
+    const rainTarget = weather === 'Rain' ? 1 : 0;
+    this.rainAmount += (rainTarget - this.rainAmount) * ease;
+    const dryEase = 1 - Math.exp(-deltaSeconds / DRY_OUT_SECONDS);
+    this.wetness += (rainTarget - this.wetness) * (rainTarget > this.wetness ? ease : dryEase);
+    this.environment.setWeather(this.cloudAmount, this.rainAmount);
+    this.townView.setWetness(this.wetness);
+
     // Real elapsed time drives clouds, swell and twinkle only; the
     // simulation never sees it (SPEC.md 2.14).
     this.environment.update(this.world.time.minuteOfDay, this.clock.elapsedTime);
@@ -368,8 +401,10 @@ export class App {
       this.clock.elapsedTime,
       this.camera,
     );
-    this.citizenView.update(deltaSeconds);
+    const speed = this.scheduler.getSpeed();
+    this.citizenView.update(deltaSeconds, this.camera, weather === 'Rain', speed < 20);
     this.vehicleView.update(this.environment.state, deltaSeconds, this.camera);
+    this.rain.update(deltaSeconds, this.rainAmount, this.camera, this.controls.target);
     // The animals run on real time too, and hide at speed (SPEC.md 2.14).
     this.wildlife.update(deltaSeconds, this.scheduler.getSpeed(), this.environment.state);
 
@@ -408,6 +443,10 @@ export class App {
     const speed = SPEED_KEYS[event.code];
     if (speed !== undefined) {
       this.setSpeed(speed);
+    }
+    const weather = WEATHER_KEYS[event.code];
+    if (weather !== undefined) {
+      this.world.setWeather(weather);
     }
   };
 
