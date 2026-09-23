@@ -47,10 +47,10 @@ const BEACH_DEPTH = 13;
 const WORLD_REACH = 700;
 
 const SAND = 0xe6d6b4;
-const HILL = 0x7d9a6c;
+const HILL = 0xa9a37c;
 const MOUNTAIN = 0x8a93a3;
-const FOREST_ROUND = 0x6c8f5e;
-const FOREST_PINE = 0x5c7f5a;
+const FOREST_OLIVE = 0x8e9c7e;
+const FOREST_CYPRESS = 0x3f5a3f;
 const TRUNK = 0x8b6b4e;
 
 const SEA_VERTEX_SHADER = /* glsl */ `
@@ -342,7 +342,8 @@ export class Scenery {
       if (rng.next() < nearness * 0.55) {
         continue;
       }
-      trees.push({ x, z, pine: rng.next() < 0.45, height: rng.nextFloat(6, 12) });
+      const pine = rng.next() < 0.4;
+      trees.push({ x, z, pine, height: pine ? rng.nextFloat(8, 13) : rng.nextFloat(5, 8) });
     }
 
     const wood = new MeshStandardMaterial({ color: TRUNK, roughness: 1, metalness: 0 });
@@ -350,7 +351,7 @@ export class Scenery {
     const crowns = new InstancedMesh(
       new IcosahedronGeometry(1, 0),
       new MeshStandardMaterial({
-        color: FOREST_ROUND,
+        color: FOREST_OLIVE,
         roughness: 1,
         metalness: 0,
         flatShading: true,
@@ -360,7 +361,7 @@ export class Scenery {
     const pines = new InstancedMesh(
       new ConeGeometry(1, 1, 6),
       new MeshStandardMaterial({
-        color: FOREST_PINE,
+        color: FOREST_CYPRESS,
         roughness: 1,
         metalness: 0,
         flatShading: true,
@@ -385,20 +386,20 @@ export class Scenery {
       placement.rotation.set(0, rng.nextFloat(0, Math.PI * 2), 0);
       if (tree.pine) {
         placement.position.set(tree.x, ground + trunkHeight + crownHeight / 2, tree.z);
-        placement.scale.set(crownHeight * 0.32, crownHeight, crownHeight * 0.32);
+        placement.scale.set(crownHeight * 0.17, crownHeight, crownHeight * 0.17);
         placement.updateMatrix();
         pines.setMatrixAt(index, placement.matrix);
         crowns.setMatrixAt(index, hidden.matrix);
       } else {
         placement.position.set(tree.x, ground + trunkHeight + crownHeight * 0.45, tree.z);
-        placement.scale.set(crownHeight * 0.55, crownHeight * 0.5, crownHeight * 0.55);
+        placement.scale.set(crownHeight * 0.7, crownHeight * 0.42, crownHeight * 0.7);
         placement.updateMatrix();
         crowns.setMatrixAt(index, placement.matrix);
         pines.setMatrixAt(index, hidden.matrix);
       }
       const shade = rng.nextFloat(-0.06, 0.06);
-      crowns.setColorAt(index, new Color(FOREST_ROUND).offsetHSL(0, 0, shade));
-      pines.setColorAt(index, new Color(FOREST_PINE).offsetHSL(0, 0, shade));
+      crowns.setColorAt(index, new Color(FOREST_OLIVE).offsetHSL(0, 0, shade));
+      pines.setColorAt(index, new Color(FOREST_CYPRESS).offsetHSL(0, 0, shade));
     });
 
     for (const mesh of [trunks, crowns, pines]) {

@@ -30,6 +30,8 @@ export interface HouseStyle {
   /** A strip of flowers along the front of the house. */
   flowerBed: boolean;
   prop: YardProp;
+  /** Magenta bougainvillea climbing the front wall: rationed to a handful of houses. */
+  bougainvillea: boolean;
 }
 
 /**

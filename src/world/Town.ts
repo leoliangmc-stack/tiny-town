@@ -72,12 +72,15 @@ export const CAFE_CLOSES_AT = 23 * 60 + 30;
 
 /**
  * The rows the houses stand in, as the z of a house centre and the way it
- * faces. Each lane has a row on either side of it.
+ * faces. The inner rows face the lanes the cars use; the outer rows turn
+ * their backs on them and face the pedestrian lanes (decision 29): the
+ * seafront promenade to the north and the upper lane below the church to
+ * the south.
  */
-const ROW_NORTH_OUTER = { z: -52, rotationY: 0 };
+const ROW_NORTH_OUTER = { z: -52, rotationY: Math.PI };
 const ROW_NORTH_INNER = { z: -28, rotationY: Math.PI };
 const ROW_SOUTH_INNER = { z: 28, rotationY: 0 };
-const ROW_SOUTH_OUTER = { z: 52, rotationY: Math.PI };
+const ROW_SOUTH_OUTER = { z: 52, rotationY: 0 };
 
 /** House centres along a row: two per block, either side of the block centre. */
 const HOUSE_X = {
@@ -159,7 +162,7 @@ export const BUILDINGS: readonly Building[] = [
     kind: 'school',
     name: 'Tiny Town School',
     position: { x: -36, z: -17 },
-    width: 20,
+    width: 23.4,
     depth: 11,
     wallHeight: 7.5,
     roofHeight: 1,
@@ -170,8 +173,8 @@ export const BUILDINGS: readonly Building[] = [
     id: 'cafe',
     kind: 'cafe',
     name: 'The Corner Cafe',
-    position: { x: 0, z: -16 },
-    width: 14,
+    position: { x: -5.6, z: -16 },
+    width: 12.4,
     depth: 9,
     wallHeight: 4.8,
     roofHeight: 0.7,
@@ -183,7 +186,7 @@ export const BUILDINGS: readonly Building[] = [
     kind: 'supermarket',
     name: 'Green Grocer',
     position: { x: 36, z: -17.5 },
-    width: 20,
+    width: 23.4,
     depth: 12,
     wallHeight: 6,
     roofHeight: 0.8,
@@ -191,19 +194,22 @@ export const BUILDINGS: readonly Building[] = [
     floors: 1,
   },
 
-  // --- The high street, south side ---
+  // The bakery shares the middle block with the cafe, wall to wall, so the
+  // north side of the high street is one parade of shops (DESIGN.md §4).
   {
     id: 'bakery',
     kind: 'bakery',
     name: 'Willow Bakery',
-    position: { x: 0, z: 16 },
-    width: 12,
+    position: { x: 6.3, z: -15.5 },
+    width: 11.2,
     depth: 8,
     wallHeight: 5,
     roofHeight: 0.5,
-    rotationY: Math.PI,
+    rotationY: 0,
     floors: 1,
   },
+
+  // --- The high street, south side ---
   {
     id: 'office',
     kind: 'office',
@@ -270,6 +276,8 @@ function houseStyle(n: number): HouseStyle {
     roofProp: ROOF_PROPS[n % ROOF_PROPS.length],
     flowerBed: n % 3 !== 0,
     prop: YARD_PROPS[n % YARD_PROPS.length],
+    // Five of the thirty: the one saturated colour, rationed (DESIGN.md §9).
+    bougainvillea: n % 6 === 1,
   };
 }
 
@@ -343,10 +351,10 @@ export interface OutdoorZone {
 }
 
 export const OUTDOOR_ZONES: readonly OutdoorZone[] = [
-  zone('cafe-terrace', 'cafe', 'terrace', -7, 7, -11.5, -6.6, 10),
-  zone('school-playground', 'school', 'playground', -46, -26, -11.5, -6.6, 12),
-  zone('supermarket-forecourt', 'supermarket', 'forecourt', 26, 46, -11.5, -6.6, 8),
-  zone('bakery-front', 'bakery', 'terrace', -6, 6, 6.6, 11.5, 5),
+  zone('cafe-terrace', 'cafe', 'terrace', -11.5, -0.5, -11.5, -6.6, 8),
+  zone('school-playground', 'school', 'playground', -47, -25, -11.5, -6.6, 12),
+  zone('supermarket-forecourt', 'supermarket', 'forecourt', 25, 47, -11.5, -6.6, 8),
+  zone('bakery-front', 'bakery', 'terrace', 1.5, 11.5, -11.5, -6.6, 5),
   zone('office-front', 'office', 'forecourt', 27, 45, 6.6, 11.5, 10),
   zone('park-lawn', 'park', 'lawn', -47.5, -24.5, 7, 30, 16),
 ];
@@ -405,47 +413,77 @@ export const PARKING_LOT = {
   entrance: { x: 58, z: -15 },
 } as const;
 
+/**
+ * The trees of a dry island (DESIGN.md §9): olives with loose silver-green
+ * crowns, cypresses as dark vertical lines, and the park's big round green
+ * trees, the one oasis.
+ */
 export interface Tree {
   position: Point;
-  shape: 'round' | 'pine';
+  shape: 'round' | 'olive' | 'cypress';
   height: number;
 }
 
 /**
- * Trees. The park is planted densely, the high street gets a row of them,
- * every empty house slot gets one, and the corners of the town get a few so
- * the grid does not end in bare grass.
+ * Trees. The park is planted densely with round green trees, the high
+ * street gets a row of olives, every empty house slot gets an olive or a
+ * cypress, and the corners of the town get cypresses so the grid does not
+ * end in bare ground.
  */
 export const TREES: readonly Tree[] = [
   ...parkTrees(),
   ...streetTrees(),
   ...emptySlotTrees(),
   // Around the school playground.
-  { position: { x: -49, z: -9 }, shape: 'round', height: 8 },
-  { position: { x: -23, z: -9 }, shape: 'round', height: 7.5 },
-  { position: { x: -49.5, z: -21 }, shape: 'pine', height: 9.5 },
-  { position: { x: -23, z: -22 }, shape: 'pine', height: 9 },
+  { position: { x: -50, z: -9 }, shape: 'olive', height: 6.5 },
+  { position: { x: -22, z: -9 }, shape: 'olive', height: 6 },
+  { position: { x: -50, z: -23 }, shape: 'cypress', height: 10 },
+  { position: { x: -22, z: -23 }, shape: 'cypress', height: 9.5 },
   // The green at the west end of the high street.
-  { position: { x: -66, z: -14 }, shape: 'round', height: 8.5 },
-  { position: { x: -74, z: -11 }, shape: 'pine', height: 10 },
-  { position: { x: -70, z: 13 }, shape: 'round', height: 8.5 },
-  { position: { x: -78, z: 16 }, shape: 'round', height: 7.5 },
-  { position: { x: -62, z: 16 }, shape: 'pine', height: 9.5 },
+  { position: { x: -66, z: -14 }, shape: 'olive', height: 7 },
+  { position: { x: -74, z: -11 }, shape: 'cypress', height: 11 },
+  { position: { x: -70, z: 13 }, shape: 'olive', height: 7 },
+  { position: { x: -78, z: 16 }, shape: 'olive', height: 6 },
+  { position: { x: -62, z: 16 }, shape: 'cypress', height: 10 },
   // Beside the car park and the eastern apartments.
-  { position: { x: 79, z: -13 }, shape: 'round', height: 7.5 },
-  { position: { x: 60, z: 14 }, shape: 'round', height: 7 },
-  { position: { x: 80, z: 12 }, shape: 'pine', height: 9 },
-  { position: { x: 60, z: -50 }, shape: 'pine', height: 9.5 },
-  { position: { x: 80, z: -48 }, shape: 'round', height: 8 },
-  { position: { x: -80, z: 48 }, shape: 'round', height: 8 },
-  { position: { x: -60, z: 50 }, shape: 'pine', height: 9.5 },
-  // The corners of the town.
-  { position: { x: -92, z: -50 }, shape: 'pine', height: 10 },
-  { position: { x: -92, z: 52 }, shape: 'round', height: 8 },
-  { position: { x: 92, z: -50 }, shape: 'round', height: 8.5 },
-  { position: { x: 92, z: 52 }, shape: 'pine', height: 10 },
-  { position: { x: -92, z: 0 }, shape: 'round', height: 7.5 },
-  { position: { x: 92, z: 2 }, shape: 'round', height: 7.5 },
+  { position: { x: 79, z: -13 }, shape: 'olive', height: 6.5 },
+  { position: { x: 60, z: 14 }, shape: 'olive', height: 6 },
+  { position: { x: 80, z: 12 }, shape: 'cypress', height: 9.5 },
+  { position: { x: 60, z: -50 }, shape: 'cypress', height: 10 },
+  { position: { x: 80, z: -48 }, shape: 'olive', height: 6.5 },
+  { position: { x: -80, z: 48 }, shape: 'olive', height: 6.5 },
+  { position: { x: -60, z: 50 }, shape: 'cypress', height: 10 },
+  // The corners of the town, and by the church.
+  { position: { x: -92, z: -50 }, shape: 'cypress', height: 11 },
+  { position: { x: -92, z: 52 }, shape: 'olive', height: 7 },
+  { position: { x: 92, z: -50 }, shape: 'olive', height: 7 },
+  { position: { x: 92, z: 52 }, shape: 'cypress', height: 11 },
+  { position: { x: -92, z: 0 }, shape: 'olive', height: 6.5 },
+  { position: { x: 92, z: 2 }, shape: 'olive', height: 6.5 },
+  { position: { x: -9, z: 84 }, shape: 'cypress', height: 12 },
+  { position: { x: 9, z: 85 }, shape: 'cypress', height: 11 },
+  { position: { x: 12, z: 70 }, shape: 'cypress', height: 10 },
+];
+
+/** Agaves and cacti (DESIGN.md §9): along the lanes and by the church. */
+export interface Succulent {
+  position: Point;
+  kind: 'agave' | 'cactus';
+}
+
+export const SUCCULENTS: readonly Succulent[] = [
+  ...[-80, -58, -36, -12, 12, 36, 58, 80].map((x, index) => ({
+    position: { x, z: -58.4 },
+    kind: (index % 3 === 0 ? 'cactus' : 'agave') as Succulent['kind'],
+  })),
+  ...[-78, -50, -28, -6, 6, 28, 50, 78].map((x, index) => ({
+    position: { x, z: 58.4 },
+    kind: (index % 3 === 1 ? 'cactus' : 'agave') as Succulent['kind'],
+  })),
+  { position: { x: -8, z: 67 }, kind: 'agave' },
+  { position: { x: 8, z: 67 }, kind: 'agave' },
+  { position: { x: -15, z: 8.5 }, kind: 'agave' },
+  { position: { x: 15, z: 8.5 }, kind: 'agave' },
 ];
 
 /** A loose ring of trees inside the park, leaving the middle for the lawn. */
@@ -463,7 +501,8 @@ function parkTrees(): Tree[] {
   ];
   return positions.map(([x, z, shape]) => ({
     position: { x, z },
-    shape,
+    // The park's trees are the big green ones: the oasis (DESIGN.md §9).
+    shape: shape === 'pine' ? 'round' : 'round',
     height: shape === 'pine' ? 10 : 8.5,
   }));
 }
@@ -472,8 +511,8 @@ function parkTrees(): Tree[] {
 function streetTrees(): Tree[] {
   const trees: Tree[] = [];
   for (const x of [-74, -60, -48, -24, 24, 48, 60, 74]) {
-    trees.push({ position: { x, z: -8.5 }, shape: 'round', height: 7 });
-    trees.push({ position: { x, z: 8.5 }, shape: 'round', height: 7 });
+    trees.push({ position: { x, z: -8.5 }, shape: 'olive', height: 6 });
+    trees.push({ position: { x, z: 8.5 }, shape: 'olive', height: 6 });
   }
   return trees;
 }
@@ -494,10 +533,11 @@ function emptySlotTrees(): Tree[] {
       if (taken || inPark) {
         continue;
       }
+      const cypress = (Math.round(x) + rowIndex) % 2 === 0;
       trees.push({
         position: { x, z: placement.z + (rowIndex % 2 === 0 ? 1 : -1) },
-        shape: (x + rowIndex) % 2 === 0 ? 'round' : 'pine',
-        height: 7.5 + ((Math.abs(x) + rowIndex) % 3),
+        shape: cypress ? 'cypress' : 'olive',
+        height: cypress ? 9.5 + ((Math.abs(x) + rowIndex) % 3) : 6 + ((Math.abs(x) + rowIndex) % 2),
       });
     }
   });
@@ -532,11 +572,9 @@ export interface FlowerBed {
 }
 
 export const FLOWER_BEDS: readonly FlowerBed[] = [
-  // Either side of the cafe terrace and the bakery front.
-  { minX: -13, maxX: -8.5, minZ: -11, maxZ: -7.5 },
-  { minX: 8.5, maxX: 13, minZ: -11, maxZ: -7.5 },
-  { minX: -12, maxX: -7.5, minZ: 7.5, maxZ: 11 },
-  { minX: 7.5, maxX: 12, minZ: 7.5, maxZ: 11 },
+  // Either side of the little square across from the cafe.
+  { minX: -13, maxX: -8.5, minZ: 7.5, maxZ: 11 },
+  { minX: 8.5, maxX: 13, minZ: 7.5, maxZ: 11 },
   // In the park, beside the path.
   { minX: -44, maxX: -28, minZ: 21.5, maxZ: 23 },
   // The green at the west end.
@@ -582,6 +620,50 @@ export interface TrafficLight {
 export const TRAFFIC_LIGHTS: readonly TrafficLight[] = [
   { x: -18, z: 0, greenMinutes: 1.5 },
   { x: 18, z: 0, greenMinutes: 1.5 },
+];
+
+/**
+ * The pedestrian lanes (SPEC.md 2.3, decision 29): a second network for
+ * people only, paved in pale stone with white joints. The seafront promenade
+ * runs behind the northern houses, the upper lane behind the southern ones
+ * below the church, and at every cross street a flight of steps joins each
+ * of them to the pavement where the street ends. The outer house rows face
+ * these lanes, so their doors are on the pedestrian network and the cars
+ * stay behind the houses. Same shape as a Street, so the graph code and the
+ * renderer can treat the two alike.
+ */
+export interface Lane extends Street {
+  /** Steps rather than a paved ramp: the lane climbs the slope. */
+  steps: boolean;
+}
+
+export const PROMENADE_Z = -60;
+export const UPPER_LANE_Z = 60;
+export const LANE_WIDTH = 2.4;
+
+export const LANES: readonly Lane[] = [
+  { id: 'promenade', axis: 'x', at: PROMENADE_Z, from: -90, to: 90, steps: false },
+  { id: 'upper-lane', axis: 'x', at: UPPER_LANE_Z, from: -90, to: 90, steps: false },
+  ...CROSS_X.flatMap((x, index): Lane[] => [
+    {
+      id: `steps-north-${index}`,
+      axis: 'z',
+      at: x,
+      from: PROMENADE_Z,
+      to: -LANE_Z - SIDEWALK_OFFSET,
+      steps: true,
+    },
+    {
+      id: `steps-south-${index}`,
+      axis: 'z',
+      at: x,
+      from: LANE_Z + SIDEWALK_OFFSET,
+      to: UPPER_LANE_Z,
+      steps: true,
+    },
+  ]),
+  // The path up from the upper lane to the church door.
+  { id: 'church-path', axis: 'z', at: 0, from: UPPER_LANE_Z, to: 66.5, steps: true },
 ];
 
 /**
@@ -711,6 +793,12 @@ export function townBounds(): { minX: number; maxX: number; minZ: number; maxZ: 
   include(PARKING_LOT.maxX, PARKING_LOT.maxZ);
   include(CHURCH.position.x - CHURCH.width / 2, CHURCH.position.z - CHURCH.depth / 2);
   include(CHURCH.position.x + CHURCH.width / 2, CHURCH.position.z + CHURCH.depth / 2);
+  for (const lane of LANES) {
+    if (lane.axis === 'x') {
+      include(lane.from, lane.at - LANE_WIDTH);
+      include(lane.to, lane.at + LANE_WIDTH);
+    }
+  }
 
   return { minX, maxX, minZ, maxZ };
 }

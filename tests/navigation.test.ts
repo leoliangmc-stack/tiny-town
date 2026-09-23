@@ -6,10 +6,12 @@ import {
   buildRoadGraph,
   buildSidewalkGraph,
   entranceNodeId,
+  isLaneNode,
   parkingNodeId,
 } from '../src/simulation/Navigation.js';
 import {
   BUILDINGS,
+  LANES,
   OUTDOOR_ZONES,
   PARKING_LOT,
   SIDEWALK_EDGE,
@@ -47,6 +49,25 @@ describe('the sidewalk graph', () => {
       const pavement = graph.node(neighbour);
       expect(distance(door.position, pavement.position)).toBeLessThan(14);
       expect(containsPoint(building, pavement.position)).toBe(false);
+    }
+  });
+
+  it('puts the doors of the outer rows on the lanes, not the pavements', () => {
+    // The rows that face away from the car lanes (SPEC.md 2.3, decision 29).
+    const outer = BUILDINGS.filter((building) => Math.abs(building.position.z) > 50);
+    expect(outer.length).toBeGreaterThan(15);
+    for (const building of outer) {
+      const [neighbour] = graph.neighbours(entranceNodeId(building.id));
+      expect(isLaneNode(neighbour), `${building.id} joins ${neighbour}`).toBe(true);
+    }
+  });
+
+  it('joins every flight of steps to the pavement at its road end', () => {
+    for (const lane of LANES.filter((candidate) => candidate.id.startsWith('steps-'))) {
+      const roadEnd = lane.from > 0 ? lane.from : lane.to;
+      const end = graph.nearestNode({ x: lane.at, z: roadEnd });
+      const pavement = graph.neighbours(end.id).find((id) => !isLaneNode(id));
+      expect(pavement, `${lane.id} does not reach a pavement`).toBeDefined();
     }
   });
 

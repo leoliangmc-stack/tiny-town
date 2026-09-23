@@ -1,5 +1,41 @@
 # Changelog
 
+## Phase 4.7 — The Greek island remake, round two: ground cover, lanes, the high street
+
+Completes the remake begun in Phase 4.7a (SPEC 2.3, 2.11, decision 29; DESIGN.md §4, §7,
+§9).
+
+- Planting. Olives with leaning trunks and loose silver-green crowns line the high street
+  and stand in the empty house slots with cypresses between them; cypresses mark the
+  corners of the town and the church. The ground is dry earth-yellow; the park's whole
+  block is lawn with its big round green trees, the one green place in town. Agaves and
+  cacti stand along the lanes, by the square and by the church. The distant forest and
+  the hills changed with them: olive crowns and cypress spires on dry ground, so the
+  slope and the hills are one country.
+- Bougainvillea on five houses: a cloud of small magenta and green quads climbing the
+  front wall beside the door and over a pergola across it. One instanced batch; the only
+  saturated colour in the style, rationed.
+- Lanes and steps. A seafront promenade behind the northern houses with a low white sea
+  wall, an upper lane behind the southern ones below the church, and at every cross
+  street a flight of solid stone steps with white noses joining lane to pavement; a path
+  of steps up to the church door. The outer house rows turned round to face the lanes, so
+  their doors, stairs, flower beds and props are on the pedestrian network and the cars
+  stay behind them. Pavements, lanes and the square are paved in pale stone with white
+  joints, textured in world space so every slab tiles alike.
+- The sidewalk graph gained the lanes: a line of nodes down each, shared where lanes
+  cross, and each flight of steps joined to the pavement corner it leads to. Two new
+  tests: every outer-row door joins a lane, and every flight of steps reaches a pavement;
+  the existing test that every entrance can walk to every other still holds, and the 30
+  day run keeps nobody stuck or off the graph.
+- The high street. The bakery moved across to stand wall to wall with the cafe, so the
+  north side is one parade of shops: school, cafe and bakery, supermarket, each filling
+  its block from pavement to pavement. Where the bakery stood there is now a small paved
+  square with a fountain and two benches. The cafe and bakery terraces sit side by side in
+  front of them.
+- Draw calls 73 → 79 by day and 80 by night (stone paving, steps, bougainvillea, agaves,
+  cypresses); p95 frame time 18.3 ms by day and by night. Lit windows remain the brightest
+  thing in the night.
+
 ## Phase 4.7a — The Greek island remake, round one: ground, buildings, landmarks
 
 The author's answer to "every building looks the same" (SPEC 2.3, 2.11, decision 29;

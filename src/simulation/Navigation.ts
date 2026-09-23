@@ -3,6 +3,7 @@ import { closestPointOnSegment, distance, type Point } from '../entities/geometr
 import type { Place } from '../entities/Citizen.js';
 import {
   BUILDINGS,
+  LANES,
   PARK_FRONT,
   PARKING_LOT,
   ROAD_WIDTH,
@@ -31,6 +32,7 @@ export interface NavNode {
 
 /** How far apart nodes are placed along a street. */
 const SIDEWALK_NODE_SPACING = 7;
+const LANE_NODE_SPACING = 6;
 const ROAD_NODE_SPACING = 9;
 
 /** Positions closer together than this are treated as the same node. */
@@ -290,7 +292,37 @@ export function buildSidewalkGraph(): NavGraph {
     }
   }
 
-  // Every building gets a door node joined to the pavement it faces.
+  // The pedestrian lanes: one line of nodes down the middle of each. A lane
+  // stops where another lane crosses it, so the two share that node, and a
+  // flight of steps ends by joining the pavement corner it leads to.
+  for (const lane of LANES) {
+    const crossings = LANES.filter(
+      (other) =>
+        other.axis !== lane.axis && other.at >= lane.from && other.at <= lane.to && other !== lane,
+    ).map((other) => other.at);
+    const stops = stopsAlong(lane, LANE_NODE_SPACING, crossings);
+    let previous: NavNode | undefined;
+    let first: NavNode | undefined;
+    for (const along of stops) {
+      const position = lane.axis === 'x' ? { x: along, z: lane.at } : { x: lane.at, z: along };
+      const node = graph.addNode(position, `lane-${lane.id}-${along.toFixed(1)}`);
+      if (previous) {
+        graph.connect(previous, node);
+      }
+      first ??= node;
+      previous = node;
+    }
+    if (lane.steps && first && previous) {
+      for (const end of [first, previous]) {
+        const nearest = graph.nearestNode(end.position, end.id);
+        if (distance(nearest.position, end.position) < LANE_NODE_SPACING) {
+          graph.connect(end, nearest);
+        }
+      }
+    }
+  }
+
+  // Every building gets a door node joined to the nearest pavement or lane.
   for (const building of BUILDINGS) {
     const door = doorPosition(building);
     const node = graph.addNode(door, entranceNodeId(building.id));
@@ -298,6 +330,11 @@ export function buildSidewalkGraph(): NavGraph {
   }
 
   return graph;
+}
+
+/** True when the node id belongs to a pedestrian lane rather than a pavement. */
+export function isLaneNode(id: string): boolean {
+  return id.startsWith('lane-');
 }
 
 export function entranceNodeId(buildingId: string): string {
