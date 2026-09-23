@@ -186,6 +186,33 @@ Companion to `SPEC.md` (the single source of truth for requirements) and `DESIGN
 - Screenshots at the four moments and both framings, plus one of the sea and beach, one of clouds by day, and one of the night sky, judged by the author against DESIGN.md.
 - All tests pass; determinism untouched.
 
+## Phase 4.7 — The Greek island remake
+
+**Goal.** Give the town a vernacular (SPEC 2.3, 2.11, decision 29; DESIGN.md §1, §4, §7, §9): a white Cycladic village on a slope above the sea. The author's answer to "every building looks the same". Too much for one session done well, so it runs in two rounds with a tag each.
+
+**Round A — ground, buildings, landmarks (tag `phase-4.7a`).**
+
+- Terrain: a heightfield in `world/Terrain.ts` (pure function, no Three.js) that tilts the town towards the sea, low at the shore and two to three storeys higher inland, flat under the beach and the sea. The renderer reads it for the ground mesh, streets, pavements, zones, props, citizens and vehicles; the simulation stays two dimensional and the state hash never sees a height.
+- Buildings rebuilt in `TownView`: stacked white cubes with flat roofs and parapets, plinths that take up the slope, external stairs, a few blue domes; coloured doors and shutters per house; one theme colour per shop through awning, door frame and sign; wide ground-floor glazing on shops; roof props (washing lines, pots, tanks on homes; air conditioning, vents, tanks on shops). 80% of houses white, 20% washed in pale ochre, rose or yellow.
+- Landmarks: the blue-domed church at the top of the slope with a warm lamp on the dome at night; the lighthouse on the headland with a beam that sweeps every few seconds, render-side only.
+- Existing trees, streets and navigation untouched in this round.
+
+**Round B — ground cover, lanes, the high street (tag `phase-4.7`).**
+
+- Vegetation: olives, cypresses, agaves and cacti replace the temperate trees on the streets and the slope; dry earth and limestone ground; the park keeps its lawn and big trees; bougainvillea on a handful of houses as instanced quads.
+- Lanes and steps: a second, pedestrian-only network of narrow lanes and stairs paved in pale stone with white joints, joining every house to the streets; the sidewalk graph is rebuilt on it; the road graph and the cars are untouched.
+- The shops move shoulder to shoulder along the high street.
+- Tests: every door reachable on the new graph; nobody stuck or off the graph across 30 days.
+
+**Out of scope.** Camera and night tilt (Phase 4.6 stands), weather, UI, the simulation.
+
+**Acceptance (both rounds).**
+
+- All tests green; determinism untouched; after Round B the reachability test covers every entrance.
+- Draw calls and p95 frame time reported; everything repeated is instanced.
+- Lit windows remain the brightest thing in the night.
+- Screenshots in `docs/phase-4.7-screenshots/`: the four moments in both framings, plus a close-up of white walls and coloured shutters, the high street, the church, the lighthouse beam at night, and one that shows the slope.
+
 ## Phase 5 — Weather and behavioural effects
 
 **Goal.** Weather that changes what citizens do, not just how the town looks.

@@ -8,13 +8,20 @@ says _how it should look_. Anything here that is not in the SPEC for v1 lives in
 
 ## 1. Direction
 
-**Cozy living miniature 3D town.**
+**Cozy living miniature 3D town, in the manner of a Greek island.**
 
 A carefully made model town on a tabletop, except the people and cars inside it live their
 own lives. Miniature model, animated film, city sandbox and desk toy, all at once.
 
+Since Phase 4.7 the town has a place and a vernacular (SPEC 2.3, 2.11, decision 29): a
+white Cycladic village on a slope above the sea, Santorini rather than a temperate suburb.
+White cubic houses with flat roofs, a few blue domes, coloured shutters and doors, dry
+ground with olives and cypresses, a park as the one green oasis, a blue-domed church on the
+hilltop and a lighthouse on the headland. The miniature feel, the soft edges, the warm
+light and the living world stay exactly as they were; only the vernacular changed.
+
 Keywords: cozy, miniature, handcrafted, stylized 3D, warm, clean, charming, cinematic,
-living world, whimsical, premium casual.
+living world, whimsical, premium casual, Aegean.
 
 The viewer should feel: _"this is a town that lives inside my computer, and I can open it
 any time to see what everybody is up to."_ Not: _"this is a 3D game map."_
@@ -37,7 +44,9 @@ detail to read as a place where people live.
 
 Buildings: simple geometry, **soft rounded edges**, a handmade feel, slightly exaggerated
 proportions, clear silhouettes, a few well-chosen decorations. They must never read as
-plain boxes.
+plain boxes. In the Aegean vernacular the volumes _are_ cubes, so the work goes into the
+stacking (a smaller upper storey set back to leave a roof terrace), the plinth that meets
+the slope, the parapets, the external stairs, the domes and what stands on the roofs.
 
 Everything stays procedurally generated in code (SPEC 2.11). Rounded boxes, smooth
 shading, matte materials and restrained detail are what separate this from "low poly",
@@ -47,17 +56,43 @@ not external models.
 
 The town has: detached houses, a few small apartment blocks, a school, a cafe, a
 supermarket, a bakery, an office, a park, a car park, roads, pavements, street lamps,
-mailboxes, trees, flower beds and fences.
+mailboxes, trees, flower beds and fences; and, since Phase 4.7, a church and a lighthouse.
 
-**Every house must be visibly its own home.** For example:
+**The vernacular (Phase 4.7).** White cubic volumes, flat roofs, a low parapet round every
+roof. Most houses are two stacked cubes: a full ground storey and a smaller upper storey
+set back to one side, leaving a roof terrace with a parapet and an external stair up to it.
+A few houses carry a small blue dome on a white drum. Every building stands on a plinth
+the colour of pale stone that takes up the slope, so the walls stay level and the ground
+does not. Walls are matte white; edges stay soft.
 
-- House 01: red roof, white walls, small garden
-- House 02: dark grey roof, cream walls, wooden fence
-- House 03: blue-grey roof, pale green walls, small balcony
-- House 04: small modern house, large windows
+**White, eight parts in ten.** About 80% of houses are pure white; the rest are washed in
+pale ochre, pale rose or pale yellow, scattered over the slope to break up the white. No
+more than that: the light already colours the walls through the day (rose at dawn, white
+at noon, orange at dusk, blue at night), and more wall colour would fight the palettes.
 
-A few signs of life per house, never a pile of them: flower pots, a mailbox, a bicycle, a
-bin, washing on a line, a garden, a small table and chairs, a porch.
+**Homes and shops are told apart by coloured parts.**
+
+- A house has door and shutters in one colour drawn per house from the island set: sea
+  blue, deep blue, green, teal, natural wood. Its ground floor is solid wall with small
+  windows. Its roof carries signs of life: a washing line with a few coloured cloths, pots,
+  a white water tank, a chair.
+- A shop or public building has one theme colour that runs through its awning, door
+  frame and sign (cafe ochre-red, bakery mustard, supermarket sea blue, school terracotta,
+  office slate blue, apartments olive). Its ground floor is glazed wide, with an awning,
+  seating outside and a sign; its roof carries equipment: air conditioning units, vents, a
+  water tank. Shops sit shoulder to shoulder along the high street; houses stand apart on
+  the slope.
+
+**Every house must still be visibly its own home**: the stacking, the dome or no dome, the
+shutter colour, the wash, the stair side and the roof props combine differently on every
+one. A few signs of life per house, never a pile of them.
+
+**Two landmarks.** A **blue-domed church** at the top of the slope: a white nave with a
+deep blue dome, a white bell tower with open arches, a cross, and one warm lamp on the
+dome at night. A **lighthouse** on the headland at the shore: a white tower with a red
+band, a lamp room, and a beam that sweeps round once every few seconds. Every other light
+in the night is still; the beam is the one that moves, and at 20x it turns into a slow
+pulse. The dome is the one clear cool colour among the whites; it answers the sea.
 
 ## 5. People
 
@@ -89,12 +124,22 @@ None of it needs to be complex. It needs to make the person look alive. The walk
 couple of idle gestures come first; the rest arrive with the behaviours that use them
 (PHASES.md Phase 3).
 
-## 7. Roads
+## 7. Roads, lanes and steps
 
 Cozy small-town roads: narrow, simple pavements, small lamps, a few signs, zebra crossings,
 parking bays. No big-city roads.
 
 Road: neutral warm grey. Pavement: warm beige-grey. Nothing garish.
+
+**Two layers since Phase 4.7.** The road grid stays as the main streets and the ring the
+cars use. Between the houses and the streets runs a second network for people only:
+narrow lanes and flights of steps paved in pale stone with white-painted joints, the
+Cycladic ground. People walk the lanes; cars keep to the streets; the two are visibly
+apart, and the morning rush reads clean.
+
+**The slope.** The whole town tilts towards the sea: low at the shore, two or three
+storeys higher inland. Streets run with the slope; buildings follow the ground under them.
+From the god view the roofs no longer share one plane, and the light stacks them.
 
 ## 8. Cars
 
@@ -104,9 +149,15 @@ on at night; wet reflections in rain.
 
 ## 9. Plants
 
-Large trees, small trees, shrubs, grass, flower beds, roadside flowers, a small vegetable
-patch. Soft, slightly exaggerated shapes. Trees may be a little larger than life so the
-town reads as a miniature. Not realistic foliage.
+Soft, slightly exaggerated shapes. Trees may be a little larger than life so the town
+reads as a miniature. Not realistic foliage.
+
+**Dry, with one oasis (Phase 4.7).** Streets and slope: olive trees (silver-grey green,
+loose crowns), cypresses (dark green, tall and thin: the vertical lines of the skyline),
+agaves and a few cacti; the ground between is dry earth-yellow and pale limestone. The
+park keeps its green lawn and big trees as the one green place in town. **Bougainvillea**,
+magenta, climbs the white walls and pergolas of a handful of houses: the one saturated
+colour in the whole style, and rationed like it.
 
 ## 10. Colour
 
@@ -120,8 +171,13 @@ Warm, natural, low saturation throughout.
 | Road      | Warm Gray   | `#77736B` |
 | UI text   | Deep Gray   | `#3F403C` |
 
-Buildings: off-white, cream, light grey, soft blue, soft green, warm brown, a little
-orange. Never fluorescent colours, saturated primaries or neon.
+Buildings since Phase 4.7: white first (`#F7F4EE`), with pale ochre, rose and yellow
+washes on a fifth of the houses; shutters and doors in sea blue `#3F7FB8`, deep blue
+`#2B4C8C`, green `#4E8A6A`, teal `#3F8F8A` and wood `#9A7452`; domes in deep blue
+`#2F4E9A`; shop themes ochre-red `#C9705F`, mustard `#D9A83E`, sea blue `#3F7FB8`,
+terracotta `#C27A5A`, slate `#5B7691`, olive `#7E8A5A`; bougainvillea magenta
+`#C93A7A`, used sparingly. Never fluorescent colours or neon. The old ivory, sage and warm
+orange remain the UI colours.
 
 ## 11. Light
 
@@ -152,8 +208,9 @@ reflected. It is a variable of the world, not a filter.
 ## 14. Camera
 
 God view, isometric-like 3D. Pan, rotate, zoom, all smooth. Default is a **moderate
-downward tilt** (about 40° landscape, about 50° portrait) so buildings, roads, people, cars
-and the park are all visible at once and a strip of sky remains for dawn and dusk.
+downward tilt** (about 28° landscape, about 38° portrait, tilting further after dark; SPEC
+2.9) so buildings, roads, people, cars and the park are all visible at once and a band of
+sky stays at the top of the frame.
 
 Selecting a person: the camera glides to them. Follow: the camera glides after them. No
 teleporting, no shaking, no wild rotation. It should feel like moving a small camera over a
@@ -184,7 +241,7 @@ edge variation is welcome so nothing looks machine-generated.
 Small details that help the viewer understand what is happening, not decoration for its own
 sake.
 
-- Houses: bicycle, flower pots, mailbox, bin
+- Houses: bicycle, flower pots, mailbox, bin; on the roof a washing line, pots, a tank
 - Cafe: outdoor tables and chairs, a chalkboard, parasols
 - School: playground, basketball hoop
 - Park: benches, lamps, flower beds, a small fountain
