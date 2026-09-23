@@ -1,6 +1,7 @@
 import {
   AdditiveBlending,
   BoxGeometry,
+  BufferAttribute,
   type BufferGeometry,
   type Camera,
   Color,
@@ -31,7 +32,7 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 import type { Building, HouseStyle } from '../entities/Building.js';
 import { Rng } from '../simulation/Rng.js';
 import type { World } from '../simulation/World.js';
-import { groundHeight, groundTiltX } from '../world/Terrain.js';
+import { countryside, groundHeight, groundTiltX } from '../world/Terrain.js';
 import {
   BUILDINGS,
   CHURCH,
@@ -78,6 +79,8 @@ const COLOR = {
   /** Dry ground: earth-yellow, with the park the one green place (DESIGN.md §9). */
   ground: 0xbcac86,
   grass: 0x8fb07a,
+  /** The meadows outside the town's shelf (DESIGN.md §9). */
+  meadow: 0x7d9e5f,
   road: 0x77736b,
   /** Pale stone for pavements, lanes and steps; the joints are painted white. */
   pavement: 0xe2dbcd,
@@ -348,17 +351,31 @@ export class TownView {
   private addGround(): void {
     // A faint blotch of two greens keeps the grass from reading as one flat
     // fill, which is the surest sign of a machine-made scene (DESIGN.md §16).
-    const material = matte(COLOR.ground);
+    const material = matte(0xffffff);
     material.map = grassTexture();
+    material.vertexColors = true;
     // A heightfield: the plane is laid flat, then every vertex is lifted to
-    // the ground height there (world/Terrain.ts), so the town sits on its slope.
-    const geometry = new PlaneGeometry(GROUND_SIZE, GROUND_SIZE, 200, 200);
+    // the ground height there (world/Terrain.ts), so the town sits on its
+    // slope and the meadows roll. Each vertex is coloured dry on the town's
+    // shelf and grass beyond it, blending across the band between.
+    const geometry = new PlaneGeometry(GROUND_SIZE, GROUND_SIZE, 240, 240);
     geometry.applyMatrix4(new Matrix4().makeRotationX(-Math.PI / 2));
     const positions = geometry.getAttribute('position');
+    const colors = new Float32Array(positions.count * 3);
+    const dry = new Color(COLOR.ground);
+    const meadow = new Color(COLOR.meadow);
+    const blend = new Color();
     for (let index = 0; index < positions.count; index += 1) {
-      positions.setY(index, groundHeight(positions.getX(index), positions.getZ(index)));
+      const x = positions.getX(index);
+      const z = positions.getZ(index);
+      positions.setY(index, groundHeight(x, z));
+      blend.copy(dry).lerp(meadow, countryside(x, z));
+      colors[index * 3] = blend.r;
+      colors[index * 3 + 1] = blend.g;
+      colors[index * 3 + 2] = blend.b;
     }
     positions.needsUpdate = true;
+    geometry.setAttribute('color', new BufferAttribute(colors, 3));
     geometry.computeVertexNormals();
     const ground = new Mesh(geometry, material);
     ground.receiveShadow = true;

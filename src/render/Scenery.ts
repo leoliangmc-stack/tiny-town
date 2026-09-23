@@ -20,7 +20,7 @@ import {
 } from 'three';
 
 import { Rng } from '../simulation/Rng.js';
-import { groundHeight } from '../world/Terrain.js';
+import { countryside, groundHeight } from '../world/Terrain.js';
 import { townBounds } from '../world/Town.js';
 
 import type { EnvironmentState } from './Environment.js';
@@ -47,10 +47,10 @@ const BEACH_DEPTH = 13;
 const WORLD_REACH = 700;
 
 const SAND = 0xe6d6b4;
-const HILL = 0xa9a37c;
+const HILL = 0x6f8f5a;
 const MOUNTAIN = 0x8a93a3;
-const FOREST_OLIVE = 0x8e9c7e;
-const FOREST_CYPRESS = 0x3f5a3f;
+const FOREST_BROADLEAF = 0x5c8a4f;
+const FOREST_CONIFER = 0x3d6040;
 const TRUNK = 0x8b6b4e;
 
 const SEA_VERTEX_SHADER = /* glsl */ `
@@ -323,27 +323,32 @@ export class Scenery {
     const trees: Array<{ x: number; z: number; pine: boolean; height: number }> = [];
 
     let attempts = 0;
-    while (trees.length < 900 && attempts < 8000) {
+    while (trees.length < 1100 && attempts < 30000) {
       attempts += 1;
-      const x = rng.nextFloat(-360, 360);
-      const z = rng.nextFloat(-40, 360);
+      const x = rng.nextFloat(-380, 380);
+      const z = rng.nextFloat(-40, 380);
       const insideTown =
         x > bounds.minX - margin &&
         x < bounds.maxX + margin &&
         z > bounds.minZ - margin &&
         z < bounds.maxZ + margin;
       const inSea = z < coastZ(x) + BEACH_DEPTH + 6;
-      const farOut = Math.hypot(x, z) > 350;
+      const farOut = Math.hypot(x, z) > 370;
       if (insideTown || inSea || farOut) {
         continue;
       }
-      // Denser away from the town, thinning at its edge.
-      const nearness = Math.max(0, 1 - (Math.hypot(x, z) - 100) / 200);
-      if (rng.next() < nearness * 0.55) {
+      // Woods begin where the meadows do, and grow in stands with open
+      // grass between them (DESIGN.md §9): a low noise decides where.
+      if (rng.next() > countryside(x, z) - 0.2) {
         continue;
       }
-      const pine = rng.next() < 0.4;
-      trees.push({ x, z, pine, height: pine ? rng.nextFloat(8, 13) : rng.nextFloat(5, 8) });
+      const stand =
+        Math.sin(x * 0.031) * Math.cos(z * 0.027 + 0.4) + 0.5 * Math.sin(x * 0.071 + z * 0.043);
+      if (stand < 0.15) {
+        continue;
+      }
+      const pine = rng.next() < 0.3;
+      trees.push({ x, z, pine, height: pine ? rng.nextFloat(9, 14) : rng.nextFloat(6, 10) });
     }
 
     const wood = new MeshStandardMaterial({ color: TRUNK, roughness: 1, metalness: 0 });
@@ -351,7 +356,7 @@ export class Scenery {
     const crowns = new InstancedMesh(
       new IcosahedronGeometry(1, 0),
       new MeshStandardMaterial({
-        color: FOREST_OLIVE,
+        color: FOREST_BROADLEAF,
         roughness: 1,
         metalness: 0,
         flatShading: true,
@@ -361,7 +366,7 @@ export class Scenery {
     const pines = new InstancedMesh(
       new ConeGeometry(1, 1, 6),
       new MeshStandardMaterial({
-        color: FOREST_CYPRESS,
+        color: FOREST_CONIFER,
         roughness: 1,
         metalness: 0,
         flatShading: true,
@@ -386,20 +391,20 @@ export class Scenery {
       placement.rotation.set(0, rng.nextFloat(0, Math.PI * 2), 0);
       if (tree.pine) {
         placement.position.set(tree.x, ground + trunkHeight + crownHeight / 2, tree.z);
-        placement.scale.set(crownHeight * 0.17, crownHeight, crownHeight * 0.17);
+        placement.scale.set(crownHeight * 0.3, crownHeight, crownHeight * 0.3);
         placement.updateMatrix();
         pines.setMatrixAt(index, placement.matrix);
         crowns.setMatrixAt(index, hidden.matrix);
       } else {
         placement.position.set(tree.x, ground + trunkHeight + crownHeight * 0.45, tree.z);
-        placement.scale.set(crownHeight * 0.7, crownHeight * 0.42, crownHeight * 0.7);
+        placement.scale.set(crownHeight * 0.6, crownHeight * 0.55, crownHeight * 0.6);
         placement.updateMatrix();
         crowns.setMatrixAt(index, placement.matrix);
         pines.setMatrixAt(index, hidden.matrix);
       }
       const shade = rng.nextFloat(-0.06, 0.06);
-      crowns.setColorAt(index, new Color(FOREST_OLIVE).offsetHSL(0, 0, shade));
-      pines.setColorAt(index, new Color(FOREST_CYPRESS).offsetHSL(0, 0, shade));
+      crowns.setColorAt(index, new Color(FOREST_BROADLEAF).offsetHSL(0, 0, shade));
+      pines.setColorAt(index, new Color(FOREST_CONIFER).offsetHSL(0, 0, shade));
     });
 
     for (const mesh of [trunks, crowns, pines]) {

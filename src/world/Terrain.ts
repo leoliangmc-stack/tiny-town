@@ -29,8 +29,52 @@ export const TOWN_GRADE = TOWN_RISE / (SLOPE_TO_Z - SLOPE_FROM_Z);
 const UPLAND_GRADE = 0.03;
 const UPLAND_TO_Z = 330;
 
+/**
+ * The town's shelf: the dry coastal ground the town stands on (SPEC.md 2.14,
+ * decision 30). Outside this box the ground turns to grass over
+ * COUNTRY_BAND metres and starts to roll.
+ */
+const SHELF_X = 96;
+const SHELF_MIN_Z = -66;
+const SHELF_MAX_Z = 92;
+const COUNTRY_BAND = 45;
+
+/**
+ * How far into the countryside a point is: 0 on the town's shelf, 1 in the
+ * meadows and woods, blending across the band between. Pure, like the height.
+ */
+export function countryside(x: number, z: number): number {
+  const dx = Math.max(0, Math.abs(x) - SHELF_X);
+  const dz = Math.max(0, z - SHELF_MAX_Z, SHELF_MIN_Z - z);
+  const outside = Math.hypot(dx, dz);
+  const t = Math.min(1, Math.max(0, outside / COUNTRY_BAND));
+  return t * t * (3 - 2 * t);
+}
+
+/**
+ * The roll of the meadows: gentle swells that only exist outside the shelf,
+ * and die away towards the shore so the sea plane stays a plane.
+ */
+function rolling(x: number, z: number): number {
+  const country = countryside(x, z);
+  if (country <= 0) {
+    return 0;
+  }
+  const shoreFade = Math.min(1, Math.max(0, (z + 70) / 30));
+  const swell =
+    2.2 * Math.sin(x / 41) * Math.cos(z / 33 + 0.7) +
+    1.4 * Math.sin(x / 17 + z / 23) +
+    0.8 * Math.cos(x / 9 - z / 13);
+  return country * shoreFade * swell;
+}
+
 /** Height of the ground at a point. */
-export function groundHeight(_x: number, z: number): number {
+export function groundHeight(x: number, z: number): number {
+  return baseHeight(z) + rolling(x, z);
+}
+
+/** The slope of the shelf and the rise beyond it, before the meadows roll. */
+function baseHeight(z: number): number {
   if (z <= SLOPE_FROM_Z) {
     return 0;
   }

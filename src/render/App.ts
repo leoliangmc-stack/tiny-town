@@ -25,6 +25,7 @@ import { SUNRISE_MINUTE, SUNSET_MINUTE } from './palettes.js';
 import { Scenery } from './Scenery.js';
 import { TownView } from './TownView.js';
 import { VehicleView } from './VehicleView.js';
+import { Wildlife } from './Wildlife.js';
 
 /**
  * The default camera, as a direction rather than a position, so the framing can
@@ -119,6 +120,7 @@ export class App {
   private readonly environment: Environment;
   private readonly scenery = new Scenery();
   private readonly townView = new TownView();
+  private readonly wildlife = new Wildlife();
   private readonly citizenView: CitizenView;
   private readonly vehicleView: VehicleView;
   private readonly debugView: DebugView | undefined;
@@ -159,6 +161,7 @@ export class App {
     this.vehicleView = new VehicleView(world);
     this.scene.add(this.scenery.root);
     this.scene.add(this.townView.root);
+    this.scene.add(this.wildlife.root);
     this.scene.add(this.citizenView.root);
     this.scene.add(this.vehicleView.root);
 
@@ -367,6 +370,8 @@ export class App {
     );
     this.citizenView.update(deltaSeconds);
     this.vehicleView.update(this.environment.state, deltaSeconds, this.camera);
+    // The animals run on real time too, and hide at speed (SPEC.md 2.14).
+    this.wildlife.update(deltaSeconds, this.scheduler.getSpeed(), this.environment.state);
 
     this.debugView?.update(this.world);
 

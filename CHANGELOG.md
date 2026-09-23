@@ -1,5 +1,33 @@
 # Changelog
 
+## Phase 4.8 — Country and wildlife
+
+The author saw the dry ground outside the town read as desert (SPEC 2.14, decision 30;
+DESIGN.md §9, §21).
+
+- The ground is zoned. The dry earth stays on the town's coastal shelf; past its edge
+  the ground fades over a forty-five metre band into grass, with no line, and the
+  meadows beyond roll gently. Each vertex of the ground heightfield carries the blend as
+  a colour, and `world/Terrain.ts` exposes it as `countryside(x, z)` so the woods, the
+  animals and anything else can ask how far out they are. The rolling dies away
+  towards the shore so the sea stays a plane.
+- The distant forest is now broadleaf and conifer woodland in stands with open grass
+  between them, and the hills are green. The mountains stay grey.
+- Wildlife in `render/Wildlife.ts`: six rabbits and two deer in the meadows, eight
+  small birds and five gulls. Rabbits nibble with the head down, then hop in a burst of
+  a few bounds and stop again. Deer graze, then raise the head and stand listening,
+  then walk to a new spot with the legs swinging. Birds sit on parapets, lamp tops and
+  cypress tops, then fly to another perch on a curve with wingbeats up and a glide down.
+  Gulls wheel over the water and the sand in slow banked circles with an occasional
+  flap, come down to the sea wall, the lighthouse gallery or the beach, and go up again.
+  At night the birds stay put and the gulls come in.
+- All of it is render side, on real time, from its own seeded generator: the
+  simulation, the state hash and the navigation graphs never see an animal. Hidden at
+  20x and 100x, as the icons over the citizens are. Three instanced parts (a blob, a
+  box, a wing) draw the whole menagerie, each in the main and the shadow pass: draw
+  calls 79 → 85 by day and 86 by night at 1x and 5x, and 79 and 80 again at 20x and
+  100x where the animals are hidden; p95 frame time 18.5 ms by day, 18.2 ms at night.
+
 ## Phase 4.7 — The Greek island remake, round two: ground cover, lanes, the high street
 
 Completes the remake begun in Phase 4.7a (SPEC 2.3, 2.11, decision 29; DESIGN.md §4, §7,
