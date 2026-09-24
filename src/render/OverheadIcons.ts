@@ -9,8 +9,12 @@ import {
   type Quaternion,
 } from 'three';
 
-/** The icons that can appear over a citizen's head (SPEC.md 2.10). */
-export type IconKind = 'umbrella';
+/**
+ * The icons that can appear over a citizen's head (SPEC.md 2.10): ☂ when an
+ * umbrella goes up, 💬 when somebody joins a conversation outdoors, ☕ when
+ * somebody sits down on the cafe terrace.
+ */
+export type IconKind = 'umbrella' | 'chat' | 'coffee';
 
 /** At most this many icons on screen at once; SPEC.md 2.10 allows three to five. */
 export const MAX_ICONS = 4;
@@ -185,7 +189,13 @@ function iconTexture(kind: IconKind): CanvasTexture {
     context.beginPath();
     context.arc(size / 2, size / 2, size / 2 - 4, 0, Math.PI * 2);
     context.fill();
-    drawUmbrella(context, size);
+    if (kind === 'umbrella') {
+      drawUmbrella(context, size);
+    } else if (kind === 'chat') {
+      drawChat(context, size);
+    } else {
+      drawCoffee(context, size);
+    }
   }
   const texture = new CanvasTexture(canvas);
   texture.colorSpace = SRGBColorSpace;
@@ -214,4 +224,59 @@ function drawUmbrella(context: CanvasRenderingContext2D, size: number): void {
   context.lineTo(size / 2, size * 0.78);
   context.arc(size / 2 - 7, size * 0.78, 7, 0, Math.PI);
   context.stroke();
+}
+
+/** A speech bubble with three dots in it. */
+function drawChat(context: CanvasRenderingContext2D, size: number): void {
+  context.fillStyle = '#f5f0e6';
+  context.beginPath();
+  context.ellipse(size / 2, size * 0.46, size * 0.28, size * 0.2, 0, 0, Math.PI * 2);
+  context.fill();
+  // The tail, down and to the left.
+  context.beginPath();
+  context.moveTo(size * 0.36, size * 0.58);
+  context.lineTo(size * 0.3, size * 0.76);
+  context.lineTo(size * 0.48, size * 0.63);
+  context.closePath();
+  context.fill();
+  context.fillStyle = 'rgba(46, 48, 62, 0.88)';
+  for (const dx of [-0.11, 0, 0.11]) {
+    context.beginPath();
+    context.arc(size / 2 + dx * size, size * 0.46, size * 0.035, 0, Math.PI * 2);
+    context.fill();
+  }
+}
+
+/** A cup on a saucer with a wisp of steam. */
+function drawCoffee(context: CanvasRenderingContext2D, size: number): void {
+  context.fillStyle = '#f5f0e6';
+  context.strokeStyle = '#f5f0e6';
+  context.lineCap = 'round';
+  // The cup: wider at the rim, rounded at the bottom.
+  context.beginPath();
+  context.moveTo(size * 0.3, size * 0.46);
+  context.lineTo(size * 0.62, size * 0.46);
+  context.quadraticCurveTo(size * 0.6, size * 0.7, size * 0.46, size * 0.7);
+  context.quadraticCurveTo(size * 0.32, size * 0.7, size * 0.3, size * 0.46);
+  context.fill();
+  // The handle.
+  context.lineWidth = 5;
+  context.beginPath();
+  context.arc(size * 0.64, size * 0.55, size * 0.06, -Math.PI / 2, Math.PI / 2);
+  context.stroke();
+  // The saucer.
+  context.lineWidth = 6;
+  context.beginPath();
+  context.moveTo(size * 0.26, size * 0.76);
+  context.lineTo(size * 0.66, size * 0.76);
+  context.stroke();
+  // Steam.
+  context.lineWidth = 4;
+  for (const x of [0.4, 0.52]) {
+    context.beginPath();
+    context.moveTo(size * x, size * 0.4);
+    context.quadraticCurveTo(size * (x - 0.05), size * 0.33, size * x, size * 0.27);
+    context.quadraticCurveTo(size * (x + 0.05), size * 0.22, size * x, size * 0.17);
+    context.stroke();
+  }
 }

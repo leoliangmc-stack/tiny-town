@@ -12,6 +12,7 @@ import {
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 
 import { isAboard, isOutside } from '../entities/Citizen.js';
+import type { Point } from '../entities/geometry.js';
 import { DEFAULT_SPEED, type SpeedLevel } from '../simulation/constants.js';
 import type { Weather } from '../simulation/WeatherSystem.js';
 import { TickScheduler } from '../simulation/TickScheduler.js';
@@ -20,6 +21,7 @@ import { World } from '../simulation/World.js';
 import { groundHeight, TOWN_RISE } from '../world/Terrain.js';
 import { townBounds } from '../world/Town.js';
 
+import { Ambience } from './Ambience.js';
 import { Boats } from './Boats.js';
 import { CitizenView } from './CitizenView.js';
 import { DebugView } from './DebugView.js';
@@ -124,6 +126,8 @@ const DRY_OUT_SECONDS = 6;
  */
 const FOLLOW_DISTANCE = 30;
 const FOLLOW_PITCH = (32 * Math.PI) / 180;
+/** A place picked from the diary is framed from a little further out than a citizen. */
+const PLACE_REACH = 1.35;
 /** When the citizen is indoors the camera backs off by this much, to show the building. */
 const FOLLOW_INDOORS_REACH = 2.1;
 const FOLLOW_REACH_EASE_SECONDS = 0.9;
@@ -204,6 +208,8 @@ export class App {
   private readonly festival = new Festival();
   private readonly palace = new MoonPalace();
   private readonly dragons = new Dragons();
+  /** The ambient sound, muted until the viewer turns it on (SPEC.md 2.12). */
+  readonly ambience = new Ambience();
   /** The camera is out at the Moon Palace, looking at Chang'e (SPEC.md 2.15). */
   private visitingPalace = false;
   private readonly moonDisc = new Vector3();
@@ -616,6 +622,11 @@ export class App {
     this.scheduler.setSpeed(speed);
   }
 
+  /** The speed the viewer picked, whether or not the town is paused right now. */
+  get chosenSpeed(): Exclude<SpeedLevel, 0> {
+    return this.speedBeforePause as Exclude<SpeedLevel, 0>;
+  }
+
   togglePause(): void {
     this.setSpeed(this.scheduler.isPaused ? this.speedBeforePause : 0);
   }
@@ -694,6 +705,9 @@ export class App {
       this.environment.state.daylight,
       this.camera,
     );
+
+    // The sound follows the hour the picture shows, so Mid-Autumn night sounds like night.
+    this.ambience.update(this.shownMinute(), this.rainAmount);
 
     this.debugView?.update(this.world);
 
@@ -806,6 +820,34 @@ export class App {
     ).multiplyScalar(FOLLOW_DISTANCE * this.followReach);
     this.startFlight(
       () => ({ position: this.followPoint.clone().add(offset), target: this.followPoint.clone() }),
+      () => undefined,
+    );
+  }
+
+  /**
+   * Flies to a place in town, for a diary entry (SPEC.md 2.10), and leaves the
+   * camera there with the viewer; "back to town" brings it home.
+   */
+  lookAtPlace(point: Point): void {
+    this.followingId = undefined;
+    this.visitingPalace = false;
+    this.autoFraming = false;
+    this.controls.enablePan = true;
+    this.controls.minDistance = 8;
+    const focus = new Vector3(
+      point.x,
+      groundHeight(point.x, point.z) + FOLLOW_LOOK_HEIGHT,
+      point.z,
+    );
+    const bearing = this.camera.position.clone().sub(this.controls.target);
+    const yaw = Math.atan2(bearing.x, bearing.z);
+    const offset = new Vector3(
+      Math.sin(yaw) * Math.cos(FOLLOW_PITCH),
+      Math.sin(FOLLOW_PITCH),
+      Math.cos(yaw) * Math.cos(FOLLOW_PITCH),
+    ).multiplyScalar(FOLLOW_DISTANCE * PLACE_REACH);
+    this.startFlight(
+      () => ({ position: focus.clone().add(offset), target: focus.clone() }),
       () => undefined,
     );
   }
@@ -1016,6 +1058,7 @@ export class App {
    * than catching up on the time that passed (SPEC.md 2.13).
    */
   private readonly handleVisibilityChange = (): void => {
+    this.ambience.setHidden(document.visibilityState === 'hidden');
     if (document.visibilityState === 'hidden') {
       this.setSpeed(0);
     } else {
@@ -1030,6 +1073,7 @@ export class App {
     window.removeEventListener('keydown', this.handleKeyDown);
     document.removeEventListener('visibilitychange', this.handleVisibilityChange);
     this.debugView?.dispose();
+    this.ambience.dispose();
     this.boats.dispose();
     this.smoke.dispose();
     this.rainbow.dispose();

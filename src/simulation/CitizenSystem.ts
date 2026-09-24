@@ -82,7 +82,7 @@ export class CitizenSystem {
   /** Who is at the cafe because the rain sent them there, for the diary. */
   private rainedInToday = new Set<string>();
   /** This tick's rain decisions, written up together so the diary reads as prose. */
-  private rainNotes: Array<{ name: string; kind: RainNote }> = [];
+  private rainNotes: Array<{ id: string; name: string; kind: RainNote }> = [];
   /** How many rain lines the diary has had today; after a couple they become colour. */
   private rainLinesToday = 0;
 
@@ -167,10 +167,12 @@ export class CitizenSystem {
       return;
     }
     for (const kind of ['cafe', 'skip-cafe', 'home', 'skip-home', 'inside'] as const) {
-      const names = this.rainNotes.filter((note) => note.kind === kind).map((note) => note.name);
-      if (names.length === 0) {
+      const notes = this.rainNotes.filter((note) => note.kind === kind);
+      if (notes.length === 0) {
         continue;
       }
+      const names = notes.map((note) => note.name);
+      const ids = notes.map((note) => note.id);
       const who = listNames(names);
       const plural = names.length > 1;
       // The first couple of rain lines a day are milestones; the rest are
@@ -183,6 +185,7 @@ export class CitizenSystem {
           minute,
           `Because of the rain, ${who} gave up on the park and went to the cafe instead.`,
           priority,
+          { who: ids, where: CAFE_ZONE_ID },
         );
       } else if (kind === 'skip-cafe') {
         this.rainLinesToday += 1;
@@ -191,6 +194,7 @@ export class CitizenSystem {
           minute,
           `Because of the rain, ${who} skipped the park and went to the cafe instead.`,
           priority,
+          { who: ids, where: CAFE_ZONE_ID },
         );
       } else if (kind === 'home') {
         this.rainLinesToday += 1;
@@ -199,6 +203,7 @@ export class CitizenSystem {
           minute,
           `Because of the rain, ${who} gave up on the park and went home.`,
           priority,
+          { who: ids, where: PARK_ZONE_ID },
         );
       } else if (kind === 'skip-home') {
         this.log.record(
@@ -206,6 +211,7 @@ export class CitizenSystem {
           minute,
           `${who} thought better of the park in the rain and stayed in.`,
           'colour',
+          { who: ids },
         );
       } else {
         this.log.record(
@@ -213,6 +219,7 @@ export class CitizenSystem {
           minute,
           `The rain sent ${who} back inside before the break was ${plural ? 'over' : 'up'}.`,
           'colour',
+          { who: ids },
         );
       }
     }
@@ -283,7 +290,10 @@ export class CitizenSystem {
     }
 
     if (this.wantsToGoOut(citizen, minute)) {
-      this.log.record(day, minute, restlessLine(citizen), 'colour');
+      this.log.record(day, minute, restlessLine(citizen), 'colour', {
+        who: [citizen.id],
+        where: 'cafe-terrace',
+      });
       this.begin(
         citizen,
         {
@@ -340,6 +350,7 @@ export class CitizenSystem {
           minute,
           `${citizen.name} stayed on in the park under an umbrella, rain or no rain.`,
           'colour',
+          { who: [citizen.id], where: PARK_ZONE_ID },
         );
       }
       return false;
@@ -348,7 +359,7 @@ export class CitizenSystem {
     const onBreak = zoneId !== PARK_ZONE_ID;
     if (onBreak && citizen.workplaceId) {
       // Back inside early; the break is over.
-      this.rainNotes.push({ name: citizen.name, kind: 'inside' });
+      this.rainNotes.push({ id: citizen.id, name: citizen.name, kind: 'inside' });
       this.begin(
         citizen,
         {
@@ -364,7 +375,7 @@ export class CitizenSystem {
     }
 
     if (citizen.personality.social >= RAIN_CAFE_SOCIAL && citizen.age >= 16) {
-      this.rainNotes.push({ name: citizen.name, kind: 'cafe' });
+      this.rainNotes.push({ id: citizen.id, name: citizen.name, kind: 'cafe' });
       this.rainedInToday.add(citizen.id);
       this.begin(
         citizen,
@@ -380,7 +391,7 @@ export class CitizenSystem {
       return true;
     }
 
-    this.rainNotes.push({ name: citizen.name, kind: 'home' });
+    this.rainNotes.push({ id: citizen.id, name: citizen.name, kind: 'home' });
     this.begin(
       citizen,
       {
@@ -416,7 +427,7 @@ export class CitizenSystem {
     }
     this.shelteredToday.add(citizen.id);
     if (pending.place.id !== PARK_ZONE_ID && citizen.workplaceId) {
-      this.rainNotes.push({ name: citizen.name, kind: 'inside' });
+      this.rainNotes.push({ id: citizen.id, name: citizen.name, kind: 'inside' });
       this.begin(
         citizen,
         {
@@ -431,7 +442,7 @@ export class CitizenSystem {
       return true;
     }
     if (citizen.personality.social >= RAIN_CAFE_SOCIAL && citizen.age >= 16) {
-      this.rainNotes.push({ name: citizen.name, kind: 'cafe' });
+      this.rainNotes.push({ id: citizen.id, name: citizen.name, kind: 'cafe' });
       this.rainedInToday.add(citizen.id);
       this.begin(
         citizen,
@@ -446,7 +457,7 @@ export class CitizenSystem {
       );
       return true;
     }
-    this.rainNotes.push({ name: citizen.name, kind: 'home' });
+    this.rainNotes.push({ id: citizen.id, name: citizen.name, kind: 'home' });
     this.begin(
       citizen,
       {
@@ -475,11 +486,11 @@ export class CitizenSystem {
     }
     if (next.place.id !== PARK_ZONE_ID) {
       // A break outside the workplace: taken indoors instead.
-      this.rainNotes.push({ name: citizen.name, kind: 'inside' });
+      this.rainNotes.push({ id: citizen.id, name: citizen.name, kind: 'inside' });
       return undefined;
     }
     if (citizen.personality.social >= RAIN_CAFE_SOCIAL && citizen.age >= 16) {
-      this.rainNotes.push({ name: citizen.name, kind: 'skip-cafe' });
+      this.rainNotes.push({ id: citizen.id, name: citizen.name, kind: 'skip-cafe' });
       this.rainedInToday.add(citizen.id);
       return {
         ...next,
@@ -488,7 +499,7 @@ export class CitizenSystem {
         duration: 25,
       };
     }
-    this.rainNotes.push({ name: citizen.name, kind: 'skip-home' });
+    this.rainNotes.push({ id: citizen.id, name: citizen.name, kind: 'skip-home' });
     return undefined;
   }
 
@@ -554,7 +565,10 @@ export class CitizenSystem {
     }
 
     if (appointment.note) {
-      this.log.record(day, minute, appointment.note, 'colour');
+      this.log.record(day, minute, appointment.note, 'colour', {
+        who: [citizen.id],
+        where: appointment.place.id,
+      });
     }
 
     if (!this.anyoneUpToday && citizen.place.kind === 'street') {
@@ -563,6 +577,8 @@ export class CitizenSystem {
         day,
         minute,
         `${citizen.name} was the first out of the door this morning, at ${clockWords(minute)}.`,
+        'milestone',
+        { who: [citizen.id], where: citizen.homeId },
       );
     }
   }
@@ -697,13 +713,18 @@ export class CitizenSystem {
           day,
           minute,
           `${citizen.name} got to ${where} ${minutesInWords(late)} late.`,
+          'milestone',
+          { who: [citizen.id], where: appointment.place.id },
         );
       }
     }
 
     if (appointment.activity === 'Relax' && appointment.place.id === 'park-lawn') {
       const verb = citizen.job === 'Retired' ? 'took a walk to the park' : 'stopped by the park';
-      this.log.record(day, minute, `${citizen.name} ${verb}.`, 'colour');
+      this.log.record(day, minute, `${citizen.name} ${verb}.`, 'colour', {
+        who: [citizen.id],
+        where: PARK_ZONE_ID,
+      });
     }
     if (
       appointment.place.kind === 'zone' &&
@@ -712,7 +733,10 @@ export class CitizenSystem {
       appointment.activity !== 'Work'
     ) {
       const where = getBuilding(getZone(appointment.place.id).buildingId).name;
-      this.log.record(day, minute, `${citizen.name} took a break outside ${where}.`, 'colour');
+      this.log.record(day, minute, `${citizen.name} took a break outside ${where}.`, 'colour', {
+        who: [citizen.id],
+        where: appointment.place.id,
+      });
     }
   }
 
@@ -736,12 +760,14 @@ export class CitizenSystem {
     this.metToday.add(other.id);
 
     const where = ZONE_PHRASES[zoneId] ?? 'in town';
+    const about = { who: [citizen.id, other.id], where: zoneId };
     if (this.rainedInToday.has(citizen.id) && this.rainedInToday.has(other.id)) {
       this.log.record(
         day,
         minute,
         `${citizen.name} and ${other.name}, both driven in by the rain, got talking ${where}.`,
         'always',
+        about,
       );
       return;
     }
@@ -750,6 +776,8 @@ export class CitizenSystem {
         day,
         minute,
         `${citizen.name}, in out of the rain, found ${other.name} ${where} and stayed to talk.`,
+        'milestone',
+        about,
       );
       return;
     }
@@ -758,6 +786,8 @@ export class CitizenSystem {
         day,
         minute,
         `${citizen.name} ran into ${other.name} ${where} and stayed to talk.`,
+        'milestone',
+        about,
       );
     } else {
       this.log.record(
@@ -765,6 +795,7 @@ export class CitizenSystem {
         minute,
         `${citizen.name} and ${other.name} got talking ${where}.`,
         'colour',
+        about,
       );
     }
   }

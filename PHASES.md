@@ -377,10 +377,36 @@ over two to three seconds.
 - Unit tests for the cap, the lifetime, the fade and the cooldown.
 - Tests, build and lint green; determinism untouched (render side only).
 
-## v1.1 backlog (do not start before v1 ships)
+## Phase 8 — v1.1: persistence, ambient sound, a clickable diary, more icons
 
-- Local persistence: save day/time/weather/speed; rebuild citizen positions from schedules on load; time frozen while away; Reset Town in a settings menu.
-- Ambient audio: 3–4 CC0 loops crossfaded by time and weather, default muted, 🔇 toggle.
-- Event log entries clickable → camera flies to the event location (handle "actor has left" gracefully).
-- Additional above-head icons (💬 social, ☕ cafe), max 3–5 on screen, 2–3 s fade, hidden at high speed.
-- Consider Blender-generated building set as a drop-in replacement for the procedural one; simulation layer unchanged.
+**Goal.** The v1.1 list from SPEC 4.2: the town remembers where it was, it can be heard,
+the diary takes the camera to what happened, and the icons say a little more.
+
+**Scope.**
+
+- Persistence (SPEC 2.13, decision 41): save day, minute, weather and the chosen speed to
+  local storage every few seconds and when the page is hidden or closed. On load, rebuild
+  by starting the World at 03:00 of the saved day (the day before if the save is earlier)
+  with the saved weather and fast-forwarding headless to the saved minute. No save means
+  Day 1 05:30 as before. ⚙ settings with "Reset town".
+- Ambient sound (SPEC 2.12, decision 40): four beds synthesised with Web Audio (dawn
+  birds, the street and the sea by day, rain, night insects), crossfaded by the shown hour
+  and the weather, muted by default, a 🔇 button in the corner, silent while hidden.
+- Clickable diary (SPEC 2.10): entries carry who and where; a click flies the camera to
+  the place and selects the citizen if they are still there, or says they have moved on.
+  A diary card bottom left on the desktop (decision 42).
+- Icons (SPEC 2.10): 💬 when somebody joins a conversation outdoors, ☕ when somebody sits
+  down on the cafe terrace, under the same rules as ☂.
+
+**Acceptance.**
+
+- Reloading the page brings back the same day, time, weather and speed; the citizens are
+  where their schedules put them; Reset town starts again at Day 1 05:30.
+- Restoring the same save twice gives the same state hash; every citizen is on the map.
+- The sound button starts the ambience, which follows the time of day and the rain.
+- Clicking a meeting in the diary flies to the cafe terrace and selects one of the two.
+- Tests, build and lint green; the 1x/100x determinism test untouched.
+
+## v1.1 backlog
+
+- Consider Blender-generated building set as a drop-in replacement for the procedural one; simulation layer unchanged. Not scheduled: it needs an external asset pipeline, which SPEC 4.2 still rules out.

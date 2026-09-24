@@ -12,6 +12,16 @@ export interface LogEntry {
   /** Minute of the day the entry was written. */
   minute: number;
   text: string;
+  /** The citizens the entry is about, by id, main actor first. */
+  who?: string[];
+  /** Where it happened: a building or outdoor zone id. */
+  where?: string;
+}
+
+/** What an entry is about, so the diary can take the camera there (SPEC.md 2.10). */
+export interface EntryAbout {
+  who?: string[];
+  where?: string;
 }
 
 /**
@@ -30,7 +40,13 @@ export class EventLog {
   private countToday = 0;
   private day = 0;
 
-  record(day: number, minute: number, text: string, priority: Priority = 'milestone'): void {
+  record(
+    day: number,
+    minute: number,
+    text: string,
+    priority: Priority = 'milestone',
+    about: EntryAbout = {},
+  ): void {
     if (day !== this.day) {
       this.day = day;
       this.countToday = 0;
@@ -46,7 +62,14 @@ export class EventLog {
     if (this.countToday >= cap) {
       return;
     }
-    this.entries.push({ day, minute, text });
+    const entry: LogEntry = { day, minute, text };
+    if (about.who && about.who.length > 0) {
+      entry.who = about.who;
+    }
+    if (about.where) {
+      entry.where = about.where;
+    }
+    this.entries.push(entry);
     this.countToday += 1;
   }
 

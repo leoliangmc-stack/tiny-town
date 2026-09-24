@@ -6,9 +6,11 @@ import type { Point } from '../entities/geometry.js';
 import type { Vehicle } from '../entities/Vehicle.js';
 
 import { CitizenSystem } from './CitizenSystem.js';
+import { START_DAY, TICKS_PER_GAME_DAY, TICKS_PER_GAME_MINUTE } from './constants.js';
 import type { EventLog } from './EventLog.js';
 import { buildRoadGraph, NavGraph } from './Navigation.js';
 import { Rng } from './Rng.js';
+import { RESTORE_FROM_MINUTE, type SavedTown } from './SavedTown.js';
 import { TimeSystem } from './TimeSystem.js';
 import { VehicleSystem } from './VehicleSystem.js';
 import { type Weather, WeatherSystem } from './WeatherSystem.js';
@@ -24,6 +26,8 @@ export interface FollowTarget {
 export interface WorldOptions {
   /** Seed for every random choice in the simulation. */
   seed?: number | string;
+  /** Where the clock opens; Day 1 05:30 unless a saved town is being rebuilt. */
+  start?: { day: number; minute: number };
 }
 
 export const DEFAULT_SEED = 'tiny-town';
@@ -47,7 +51,7 @@ const PUBLIC_OPENING_HOURS: Record<string, [number, number]> = {
 export class World {
   readonly seed: number | string;
   readonly rng: Rng;
-  readonly time = new TimeSystem();
+  readonly time: TimeSystem;
   readonly citizenSystem: CitizenSystem;
   readonly vehicleSystem: VehicleSystem;
   readonly weather = new WeatherSystem();
@@ -56,10 +60,38 @@ export class World {
   constructor(options: WorldOptions = {}) {
     this.seed = options.seed ?? DEFAULT_SEED;
     this.rng = new Rng(this.seed);
+    this.time = options.start
+      ? new TimeSystem(options.start.day, options.start.minute)
+      : new TimeSystem();
     this.citizenSystem = new CitizenSystem(this.seed);
     this.roads = buildRoadGraph();
     this.vehicleSystem = new VehicleSystem(this.roads, (id) => this.citizenSystem.homeOf(id));
     this.citizenSystem.vehicles = this.vehicleSystem;
+  }
+
+  /**
+   * Rebuilds a saved town (SPEC.md 2.13, decision 41). The clock opens at
+   * 03:00 of the saved day, or of the day before when the save is earlier than
+   * that, with everybody asleep at home; the saved weather is set without a
+   * diary line; then the day runs headless up to the saved minute. The same
+   * save always rebuilds the same town.
+   */
+  static restore(
+    save: Pick<SavedTown, 'day' | 'minute' | 'weather'>,
+    options: WorldOptions = {},
+  ): World {
+    const target =
+      (save.day - START_DAY) * TICKS_PER_GAME_DAY + Math.round(save.minute * TICKS_PER_GAME_MINUTE);
+    let fromDay = save.minute >= RESTORE_FROM_MINUTE ? save.day : save.day - 1;
+    let fromMinute = RESTORE_FROM_MINUTE;
+    if (fromDay < START_DAY) {
+      fromDay = save.day;
+      fromMinute = save.minute;
+    }
+    const world = new World({ ...options, start: { day: fromDay, minute: fromMinute } });
+    world.weather.current = save.weather;
+    world.tickMany(Math.max(0, target - world.time.absoluteTick));
+    return world;
   }
 
   get vehicles(): readonly Vehicle[] {

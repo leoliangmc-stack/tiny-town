@@ -382,3 +382,139 @@
   color: var(--tt-gray-soft);
   font-variant-numeric: tabular-nums;
 }
+
+/* A diary line that takes the camera to what happened (SPEC.md 2.10). */
+.tt-log-link {
+  cursor: pointer;
+  border-radius: 6px;
+}
+
+.tt-log-link:hover .tt-log-text {
+  text-decoration: underline;
+  text-decoration-color: var(--tt-gray-soft);
+  text-underline-offset: 2px;
+}
+
+.tt-log-link:focus-visible {
+  outline: 2px solid var(--tt-sage);
+  outline-offset: 1px;
+}
+
+/* --- The diary card, bottom left on a wide screen (decision 42) -------- */
+
+.tt-diary {
+  left: 12px;
+  bottom: calc(12px + var(--tt-safe-bottom));
+  width: min(300px, calc(50vw - 170px));
+  padding: 4px 12px 8px;
+}
+
+.tt-portrait .tt-diary {
+  display: none;
+}
+
+.tt-diary-toggle {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+  padding: 4px 0;
+  font-weight: 600;
+}
+
+.tt-chevron {
+  color: var(--tt-gray-soft);
+  transition: transform 160ms ease;
+}
+
+.tt-diary.tt-open .tt-chevron {
+  transform: rotate(180deg);
+}
+
+.tt-diary .tt-log {
+  max-height: 40vh;
+  overflow: auto;
+}
+
+/* Closed, only the three latest lines show. */
+.tt-diary:not(.tt-open) .tt-log-entry:not(:nth-last-child(-n + 3)) {
+  display: none;
+}
+
+/* --- Sound and settings: bottom right, or top right in portrait ------- */
+
+.tt-corner {
+  right: 12px;
+  bottom: calc(12px + var(--tt-safe-bottom));
+  display: flex;
+  gap: 2px;
+  padding: 4px;
+}
+
+.tt-corner-button {
+  width: 34px;
+  height: 30px;
+}
+
+.tt-settings {
+  right: 98px;
+  bottom: calc(12px + var(--tt-safe-bottom));
+  width: 200px;
+  padding: 10px 14px 12px;
+}
+
+.tt-settings-title {
+  margin: 0 0 8px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.tt-ui button.tt-reset {
+  width: 100%;
+  padding: 7px 12px;
+  border: 1px solid rgba(63, 64, 60, 0.25);
+}
+
+.tt-ui button.tt-reset.tt-confirm {
+  background: var(--tt-orange);
+  border-color: transparent;
+  color: #fffaf2;
+  font-weight: 600;
+}
+
+.tt-settings-hint {
+  margin: 6px 0 0;
+  color: var(--tt-gray-soft);
+  font-size: 12px;
+}
+
+/* A short note, such as somebody in the diary having moved on. */
+.tt-toast {
+  left: 50%;
+  bottom: calc(60px + var(--tt-safe-bottom));
+  transform: translateX(-50%);
+  padding: 7px 14px;
+  white-space: nowrap;
+}
+
+.tt-portrait .tt-corner {
+  top: calc(10px + var(--tt-safe-top));
+  right: 10px;
+  bottom: auto;
+  padding: 3px;
+}
+
+.tt-portrait .tt-return {
+  top: calc(52px + var(--tt-safe-top));
+}
+
+.tt-portrait .tt-settings {
+  top: calc(52px + var(--tt-safe-top));
+  right: 10px;
+  bottom: auto;
+}
+
+.tt-portrait .tt-toast {
+  top: calc(96px + var(--tt-safe-top));
+  bottom: auto;
+}

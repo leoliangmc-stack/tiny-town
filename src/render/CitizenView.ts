@@ -20,6 +20,7 @@ import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeom
 
 import type { Citizen } from '../entities/Citizen.js';
 import { isOutside, isWalking } from '../entities/Citizen.js';
+import { CAFE_ZONE_ID } from '../simulation/ScheduleSystem.js';
 import type { World } from '../simulation/World.js';
 import { groundHeight } from '../world/Terrain.js';
 
@@ -83,6 +84,8 @@ interface Drawn {
   umbrella: number;
   /** Whether the umbrella was wanted last frame, to catch the moment it opens. */
   umbrellaWanted: boolean;
+  /** The zone the citizen was socialising in last frame, to catch them sitting down. */
+  socialZone: string | undefined;
 }
 
 /** Real seconds an umbrella takes to open or close. */
@@ -149,6 +152,7 @@ export class CitizenView {
         idleOffset: index * 1.7,
         umbrella: 0,
         umbrellaWanted: false,
+        socialZone: undefined,
       });
       const look = citizen.look;
       this.parts.head.setColorAt(index, new Color(look.skin));
@@ -195,6 +199,7 @@ export class CitizenView {
         drawn.x = citizen.position.x;
         drawn.z = citizen.position.z;
         drawn.umbrellaWanted = false;
+        drawn.socialZone = undefined;
         for (const mesh of Object.values(this.parts)) {
           mesh.setMatrixAt(index, this.hidden);
         }
@@ -215,6 +220,28 @@ export class CitizenView {
         this.icons.scheduler.offer(citizen.id, 'umbrella');
       }
       drawn.umbrellaWanted = wantsUmbrella;
+
+      // 💬 for joining a conversation already going on outdoors, ☕ for
+      // sitting down on the cafe terrace alone.
+      const socialZone =
+        citizen.activity === 'Socialize' && citizen.place.kind === 'zone'
+          ? citizen.place.id
+          : undefined;
+      if (socialZone && socialZone !== drawn.socialZone && showIcons && this.onScreen(drawn)) {
+        const joining = this.drawn.some(
+          (other) =>
+            other !== drawn &&
+            other.citizen.activity === 'Socialize' &&
+            other.citizen.place.kind === 'zone' &&
+            other.citizen.place.id === socialZone,
+        );
+        if (joining) {
+          this.icons.scheduler.offer(citizen.id, 'chat');
+        } else if (socialZone === CAFE_ZONE_ID) {
+          this.icons.scheduler.offer(citizen.id, 'coffee');
+        }
+      }
+      drawn.socialZone = socialZone;
 
       this.pose(index, drawn);
     });

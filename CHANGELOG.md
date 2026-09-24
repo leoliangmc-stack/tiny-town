@@ -1,5 +1,31 @@
 # Changelog
 
+## Phase 8 — v1.1: persistence, ambient sound, a clickable diary, more icons
+
+The v1.1 list from SPEC 4.2, with decisions 40 to 42 written into the SPEC first.
+
+- Persistence (SPEC 2.13, decision 41): `simulation/SavedTown.ts` holds the save format
+  (day, minute, weather, chosen speed) and its validation; `ui/Persistence.ts` writes it to
+  local storage every 5 s and when the page is hidden or closed. `World.restore` starts the
+  clock at 03:00 of the saved day (the day before for a save in the small hours), sets the
+  weather without a diary line and runs headless to the saved minute, so everybody is where
+  their schedule puts them and the diary holds the day so far. A first visit still opens
+  on Day 1 at 05:30. ⚙ settings with "Reset town", which asks once more before it clears.
+- Ambient sound (SPEC 2.12, decision 40): `render/Ambience.ts` synthesises four beds with
+  Web Audio, no audio files: dawn birds (scheduled chirps), the street and the sea by day,
+  rain (filtered noise), night crickets. Crossfaded by the hour the picture shows and the
+  eased rain, so Mid-Autumn night sounds like night. Muted until 🔇 is pressed; suspended
+  while the page is hidden. Zero bytes added to the first load.
+- Clickable diary (SPEC 2.10): entries record who and where. A click flies the camera to
+  the place and selects the person if they are still there, or says "Tom has moved on.";
+  an entry with only a person goes to where they are now; weather lines and the last light
+  out stay plain. On the desktop the diary lives in a card bottom left (decision 42) that
+  shows the three latest lines and opens from its title.
+- Icons (SPEC 2.10): 💬 when somebody joins a conversation outdoors, ☕ when somebody sits
+  down on the cafe terrace alone, under the Phase 7.4 rules.
+- Tests: save validation, restore (clock, weather, positions, same save same hash, small
+  hours, keeps living), the diary's who and where and its trips, the sound beds. 122 tests.
+
 ## Phase 7.4 — Umbrella icon rules
 
 SPEC 2.10 allows three to five icons on screen, each fading out in two to three seconds.
