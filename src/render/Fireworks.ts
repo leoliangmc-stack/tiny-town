@@ -31,7 +31,25 @@ const GRAVITY = 7;
 const COLORS = [0xffd36b, 0xff5a4a, 0xff8fc8, 0x7cf08a, 0xbfe3ff, 0xffa84a, 0xd4a0ff];
 const WILLOW_GOLD = 0xffc85a;
 
-type BurstKind = 'peony' | 'chrysanthemum' | 'willow' | 'ring' | 'crackle';
+export type BurstKind = 'peony' | 'chrysanthemum' | 'willow' | 'ring' | 'crackle';
+
+/**
+ * A moment the fireworks make a sound (decision 43): a shell leaving its
+ * launcher, or bursting. The ambience hears these and plays them, delayed by
+ * the distance the way thunder is.
+ */
+export interface FireworkSound {
+  kind: 'launch' | 'burst';
+  position: Vector3;
+  /** A beach shell: big and high. The town's are small and low. */
+  big: boolean;
+  burst: BurstKind;
+  /** Seconds from the launch to the burst. */
+  fuse: number;
+}
+
+/** Sounds kept for the ambience between frames; beyond this nobody is listening. */
+const MAX_PENDING_SOUNDS = 64;
 const BEACH_KINDS: readonly BurstKind[] = [
   'peony',
   'peony',
@@ -147,6 +165,7 @@ export class Fireworks {
   private readonly sizes: Float32Array;
   private readonly townSites: Vector3[];
   private readonly pending: Pending[] = [];
+  private readonly sounds: FireworkSound[] = [];
   private untilBeach = 0;
   private untilTown = 0;
   private time = 0;
@@ -285,6 +304,25 @@ export class Fireworks {
     shell.fall = 1;
     shell.trail = 40;
     shell.strobe = false;
+    this.hear({
+      kind: 'launch',
+      position: from.clone(),
+      big: scale === BEACH,
+      burst: shell.burst,
+      fuse: shell.life,
+    });
+  }
+
+  /** The launches and bursts since the last call, oldest first (decision 43). */
+  takeSounds(): FireworkSound[] {
+    return this.sounds.splice(0);
+  }
+
+  private hear(sound: FireworkSound): void {
+    this.sounds.push(sound);
+    if (this.sounds.length > MAX_PENDING_SOUNDS) {
+      this.sounds.shift();
+    }
   }
 
   private spawn(): Spark | undefined {
@@ -303,6 +341,13 @@ export class Fireworks {
 
   private explode(shell: Spark): void {
     const { scale, burst } = shell;
+    this.hear({
+      kind: 'burst',
+      position: shell.position.clone(),
+      big: scale === BEACH,
+      burst,
+      fuse: 0,
+    });
     const base = shell.burstColor;
     // Now and then a second colour mixed in, and now and then a big one.
     const second = this.rng.chance(0.35) ? new Color(this.rng.pick(COLORS)) : base;

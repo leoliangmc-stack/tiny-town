@@ -407,6 +407,27 @@ the diary takes the camera to what happened, and the icons say a little more.
 - Clicking a meeting in the diary flies to the cafe terrace and selects one of the two.
 - Tests, build and lint green; the 1x/100x determinism test untouched.
 
+## Phase 8.1 — Weather sounds and a Mid-Autumn soundtrack
+
+**Goal.** Each weather should sound different, and Mid-Autumn night should have a sound of
+its own (SPEC 2.12, decision 43).
+
+**Scope.**
+
+- Sunny: more birds, gull cries over the beach by day. Cloudy: gusting wind, fewer birds,
+  no gulls. Rain: the rain bed plus drips off the awnings; birds and insects hushed.
+- Mid-Autumn night: a slow plucked pentatonic tune (guzheng-like) under the night, and
+  every firework heard: a mortar thump and, for the beach shells, a rising whistle; a boom
+  with a crackle or a fizz for the kinds that have them. Delayed by distance at the speed
+  of sound and fainter with distance; at most six bursts a second heard.
+
+**Acceptance.**
+
+- The three weathers give three different mixes at the same hour; Mid-Autumn night mutes
+  the day beds and plays the tune.
+- Every launch and burst the fireworks make reaches the ambience.
+- Tests, build and lint green; determinism untouched (render side only).
+
 ## v1.1 backlog
 
 - Consider Blender-generated building set as a drop-in replacement for the procedural one; simulation layer unchanged. Not scheduled: it needs an external asset pipeline, which SPEC 4.2 still rules out.

@@ -17,7 +17,7 @@ import { Rng } from '../simulation/Rng.js';
 import { groundHeight } from '../world/Terrain.js';
 import { STREET_LAMP_HEIGHT, streetLampPositions } from '../world/Town.js';
 
-import { Fireworks } from './Fireworks.js';
+import { Fireworks, type FireworkSound } from './Fireworks.js';
 import { glowTexture } from './glow.js';
 
 /**
@@ -190,6 +190,11 @@ export class Festival {
     this.glows.instanceMatrix.needsUpdate = true;
 
     this.fireworks.update(dt);
+  }
+
+  /** The fireworks' launches and bursts since the last frame, for the ambience. */
+  takeFireworkSounds(): FireworkSound[] {
+    return this.fireworks.takeSounds();
   }
 
   dispose(): void {

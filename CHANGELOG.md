@@ -1,5 +1,30 @@
 # Changelog
 
+## Phase 8.1 — Weather sounds and a Mid-Autumn soundtrack
+
+SPEC 2.12 and decision 43, at the author's request: Sunny and Cloudy sounded the same, and
+Mid-Autumn night played the ordinary night.
+
+- `bedLevels` takes the eased sky (cloud and rain, as the picture shows them) and whether
+  Mid-Autumn night is on. Sunny: birds up to twice as busy by day, and a gulls bed whose
+  cries (a sawtooth through a narrow band, rising then falling) come every ten seconds or
+  so. Cloudy: a wind bed, a band of noise whose loudness and pitch a new gust moves every
+  one to three seconds; fewer birds. Rain: drips (bright ticks, a few a second) over the
+  rain bed; the wind half as strong; birds and insects hushed.
+- Mid-Autumn night: the day beds go quiet, the crickets and the sea drop to about half,
+  and a festival bed plays a plucked tune in D major pentatonic: four harmonics, the upper
+  ones dying first, the pitch pressed up into place; phrases of four to seven notes a step
+  at a time, opened by a low note and resting on D or A, three to six seconds apart.
+- Fireworks are heard: `Fireworks` records every launch and burst, `Festival` hands them
+  over each frame, and `App` gives the ambience each one's distance and side. A launch is
+  a mortar thump, plus a rising whistle for the beach shells; a burst a low boom with a
+  puff of air, a spray of pops for crackle and a fizz for willow. Each sounds at
+  distance / 343 m/s after the flash, at 80 m / distance loudness; a salvo is capped at
+  six bursts a second.
+- Tests: the three weathers give three different mixes; gulls only in the sun, wind under
+  cloud, the rain hushing birds and insects; the festival mix; every launch and burst of a
+  twenty second show reaches the listener.
+
 ## Phase 8 — v1.1: persistence, ambient sound, a clickable diary, more icons
 
 The v1.1 list from SPEC 4.2, with decisions 40 to 42 written into the SPEC first.

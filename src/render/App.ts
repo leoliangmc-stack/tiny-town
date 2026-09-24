@@ -21,13 +21,14 @@ import { World } from '../simulation/World.js';
 import { groundHeight, TOWN_RISE } from '../world/Terrain.js';
 import { townBounds } from '../world/Town.js';
 
-import { Ambience } from './Ambience.js';
+import { Ambience, type FireworkCue } from './Ambience.js';
 import { Boats } from './Boats.js';
 import { CitizenView } from './CitizenView.js';
 import { DebugView } from './DebugView.js';
 import { Dragons } from './Dragons.js';
 import { Environment } from './Environment.js';
 import { Festival } from './Festival.js';
+import type { FireworkSound } from './Fireworks.js';
 import { MoonPalace } from './MoonPalace.js';
 import { Rain } from './Rain.js';
 import { Rainbow, type RainbowMode } from './Rainbow.js';
@@ -463,6 +464,19 @@ export class App {
     return this.festival.isActive ? FESTIVAL_MINUTE : this.world.time.minuteOfDay;
   }
 
+  /** Where a firework is from the listener: how far, and how far to the left or right. */
+  private fireworkCue(sound: FireworkSound): FireworkCue {
+    const local = sound.position.clone().applyMatrix4(this.camera.matrixWorldInverse);
+    return {
+      kind: sound.kind,
+      big: sound.big,
+      burst: sound.burst,
+      fuse: sound.fuse,
+      distance: sound.position.distanceTo(this.camera.position),
+      pan: MathUtils.clamp(local.x / Math.max(1, Math.abs(local.z)), -1, 1) * 0.8,
+    };
+  }
+
   /** Whether Mid-Autumn night is on (SPEC.md 2.15). */
   get midAutumn(): boolean {
     return this.festival.isActive;
@@ -696,6 +710,10 @@ export class App {
     this.trafficLights.update(this.world, this.camera, this.environment.state.lampFactor);
     this.smoke.update(this.world, this.environment.state, deltaSeconds);
     this.festival.update(deltaSeconds, this.camera);
+    // Every launch and burst on Mid-Autumn night is heard, after it is seen (decision 43).
+    for (const sound of this.festival.takeFireworkSounds()) {
+      this.ambience.firework(this.fireworkCue(sound));
+    }
     this.palace.update(deltaSeconds);
     this.dragons.update(deltaSeconds);
     this.rainbow.update(
@@ -707,7 +725,11 @@ export class App {
     );
 
     // The sound follows the hour the picture shows, so Mid-Autumn night sounds like night.
-    this.ambience.update(this.shownMinute(), this.rainAmount);
+    this.ambience.update(
+      this.shownMinute(),
+      { cloud: this.cloudAmount, rain: this.rainAmount },
+      this.festival.isActive,
+    );
 
     this.debugView?.update(this.world);
 
