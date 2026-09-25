@@ -20,13 +20,17 @@ import {
 } from 'three';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 
+import { COASTER_VOYAGE, LAUNCH_VOYAGE, type Voyage, voyagePose } from '../world/Countryside.js';
+
 import type { EnvironmentState } from './Environment.js';
 import { glowTexture } from './glow.js';
 
 /**
  * Boats on the sea (SPEC.md 2.14, decision 32): two sailboats circling
  * inshore, a fishing boat running along the coast and a ferry crossing far
- * out, its ends lost in the haze.
+ * out, its ends lost in the haze. Two more come and go (decision 44): a
+ * coaster that leaves the fishing village's harbour for the horizon and comes
+ * back, and a small passenger boat between that harbour and the island.
  *
  * Like the clouds and the swell they move on real time and are pure render
  * side: the simulation, the state hash and the navigation graphs never know
@@ -45,7 +49,7 @@ const FERRY_FADE = 60;
 
 const WARM_LAMP = 0xffd9a0;
 
-type BoatKind = 'sail' | 'fishing' | 'ferry';
+type BoatKind = 'sail' | 'fishing' | 'ferry' | 'coaster' | 'launch';
 
 /** A closed loop on the water: an ellipse, sailed once every `period` seconds. */
 interface Loop {
@@ -71,13 +75,19 @@ interface Crossing {
   start: number;
 }
 
+/** A voyage between two harbours, or out to the horizon and back (world/Countryside.ts). */
+interface Plied {
+  kind: 'voyage';
+  voyage: Voyage;
+}
+
 interface BoatSpec {
   kind: BoatKind;
   hull: number;
   trim: number;
   /** Hull length; the other sizes follow from it. */
   length: number;
-  course: Loop | Crossing;
+  course: Loop | Crossing | Plied;
 }
 
 /**
@@ -140,6 +150,20 @@ const BOATS: readonly BoatSpec[] = [
     length: 24,
     course: { kind: 'crossing', z: -225, speed: 4.5, start: 300 },
   },
+  {
+    kind: 'coaster',
+    hull: 0x8a4a3c,
+    trim: 0xf5f2ea,
+    length: 16,
+    course: { kind: 'voyage', voyage: COASTER_VOYAGE },
+  },
+  {
+    kind: 'launch',
+    hull: 0xf5f2ea,
+    trim: 0x2f4e9a,
+    length: 9,
+    course: { kind: 'voyage', voyage: LAUNCH_VOYAGE },
+  },
 ];
 
 type Part = 'hull' | 'cabin' | 'mast' | 'sail' | 'wake' | 'lamp';
@@ -149,6 +173,8 @@ const PARTS_PER_KIND: Record<BoatKind, Record<Part, number>> = {
   sail: { hull: 1, cabin: 1, mast: 1, sail: 2, wake: 1, lamp: 1 },
   fishing: { hull: 1, cabin: 2, mast: 1, sail: 0, wake: 1, lamp: 1 },
   ferry: { hull: 1, cabin: 2, mast: 1, sail: 0, wake: 1, lamp: 1 },
+  coaster: { hull: 1, cabin: 3, mast: 1, sail: 0, wake: 1, lamp: 1 },
+  launch: { hull: 1, cabin: 2, mast: 1, sail: 0, wake: 1, lamp: 1 },
 };
 
 export class Boats {
@@ -248,18 +274,19 @@ export class Boats {
   }
 
   private draw(boat: BoatSpec, index: number, time: number, camera: Camera): void {
-    const { x, z, heading, scale } = where(boat, time);
+    const { x, z, heading, scale, moving } = where(boat, time);
     const length = boat.length * scale;
     if (length <= 0.01) {
       return;
     }
-    const width = length * (boat.kind === 'ferry' ? 0.24 : 0.36);
-    const hullHeight = length * (boat.kind === 'ferry' ? 0.13 : 0.2);
+    const big = boat.kind === 'ferry' || boat.kind === 'coaster';
+    const width = length * (big ? 0.24 : boat.kind === 'launch' ? 0.3 : 0.36);
+    const hullHeight = length * (big ? 0.13 : 0.2);
 
     // A gentle swell: bob, roll and pitch, each on its own beat per boat.
     const bob = Math.sin(time * 1.3 + index * 1.7) * 0.08 * scale;
-    const roll = Math.sin(time * 0.9 + index * 2.3) * (boat.kind === 'ferry' ? 0.01 : 0.05);
-    const pitch = Math.sin(time * 1.1 + index * 0.7) * (boat.kind === 'ferry' ? 0.006 : 0.03);
+    const roll = Math.sin(time * 0.9 + index * 2.3) * (big ? 0.01 : 0.05);
+    const pitch = Math.sin(time * 1.1 + index * 0.7) * (big ? 0.006 : 0.03);
     // Sailboats heel a little away from the wind.
     const heel = boat.kind === 'sail' ? 0.12 : 0;
     const base = new Matrix4().compose(
@@ -292,14 +319,16 @@ export class Boats {
     );
 
     // The wake: a soft pale streak behind, flat on the water, not rolling with the hull.
+    // A boat tied up at a quay leaves none.
     const wakeSlot = this.used.wake++;
+    const wakeLength = moving ? length * 2.4 : 0;
     const back = new Vector3(Math.sin(heading), 0, Math.cos(heading)).multiplyScalar(-length * 1.1);
     this.parts.wake.setMatrixAt(
       wakeSlot,
       new Matrix4().compose(
         new Vector3(x + back.x, WATERLINE + 0.03, z + back.z),
         new Quaternion().setFromAxisAngle(new Vector3(0, 1, 0), heading),
-        new Vector3(width * 1.6, 1, length * 2.4),
+        new Vector3(width * 1.6, 1, wakeLength),
       ),
     );
 
@@ -353,6 +382,49 @@ export class Boats {
         0x8b6b4e,
       );
       lampAt = new Vector3(0, deck + 3.2, length * 0.2);
+    } else if (boat.kind === 'coaster') {
+      // The coaster: a white bridge aft, two stacks of cargo forward, a funnel.
+      place(
+        'cabin',
+        new Vector3(0, deck + 1.4, -length * 0.34),
+        new Vector3(width * 0.8, 2.8, length * 0.18),
+        boat.trim,
+      );
+      place(
+        'cabin',
+        new Vector3(0, deck + 0.6, length * 0.02),
+        new Vector3(width * 0.78, 1.2, length * 0.26),
+        0x3f7fb8,
+      );
+      place(
+        'cabin',
+        new Vector3(0, deck + 0.6, length * 0.3),
+        new Vector3(width * 0.7, 1.2, length * 0.2),
+        0xc9a45f,
+      );
+      place(
+        'mast',
+        new Vector3(0, deck + 3.4, -length * 0.4),
+        new Vector3(0.5, 1.6, 0.5),
+        0x3f3d3a,
+      );
+      lampAt = new Vector3(0, deck + 3.2, -length * 0.3);
+    } else if (boat.kind === 'launch') {
+      // The passenger boat: a long low cabin with a coloured roof and a short mast.
+      place(
+        'cabin',
+        new Vector3(0, deck + 0.55, -length * 0.05),
+        new Vector3(width * 0.8, 1.1, length * 0.5),
+        0xf5f2ea,
+      );
+      place(
+        'cabin',
+        new Vector3(0, deck + 1.15, -length * 0.05),
+        new Vector3(width * 0.86, 0.14, length * 0.56),
+        boat.trim,
+      );
+      place('mast', new Vector3(0, deck + 2, length * 0.1), new Vector3(0.06, 2.2, 0.06), 0xd8d2c4);
+      lampAt = new Vector3(0, deck + 3.1, length * 0.1);
     } else {
       // The ferry: a long white superstructure and a funnel.
       place(
@@ -379,7 +451,7 @@ export class Boats {
     // A small lamp: a warm glow turned to the camera.
     const lampSlot = this.used.lamp++;
     const lampWorld = lampAt.applyMatrix4(base);
-    const glowSize = boat.kind === 'ferry' ? 5 : 3;
+    const glowSize = big ? 5 : 3;
     this.parts.lamp.setMatrixAt(
       lampSlot,
       new Matrix4().compose(
@@ -402,8 +474,11 @@ export class Boats {
 function where(
   boat: BoatSpec,
   time: number,
-): { x: number; z: number; heading: number; scale: number } {
+): { x: number; z: number; heading: number; scale: number; moving: boolean } {
   const course = boat.course;
+  if (course.kind === 'voyage') {
+    return voyagePose(course.voyage, time);
+  }
   if (course.kind === 'loop') {
     const angle = course.phase + (course.direction * time * Math.PI * 2) / course.period;
     const x = course.centreX + course.radiusX * Math.cos(angle);
@@ -411,14 +486,14 @@ function where(
     const dx = -course.radiusX * Math.sin(angle) * course.direction;
     const dz = course.radiusZ * Math.cos(angle) * course.direction;
     // Heading is measured from +Z towards +X, as for the cars.
-    return { x, z, heading: Math.atan2(dx, dz), scale: 1 };
+    return { x, z, heading: Math.atan2(dx, dz), scale: 1, moving: true };
   }
   const span = FERRY_REACH * 2;
   const along = (((course.start + time * course.speed) % span) + span) % span;
   const x = along - FERRY_REACH;
   const fromEnd = Math.min(along, span - along);
   const scale = Math.min(1, fromEnd / FERRY_FADE);
-  return { x, z: course.z, heading: Math.PI / 2, scale };
+  return { x, z: course.z, heading: Math.PI / 2, scale, moving: true };
 }
 
 /**

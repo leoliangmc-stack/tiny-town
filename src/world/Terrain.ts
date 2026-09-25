@@ -68,6 +68,18 @@ function rolling(x: number, z: number): number {
   return country * shoreFade * swell;
 }
 
+/**
+ * Where the shore lies: a gentle bay north of the town, z growing more
+ * negative seawards. The sea shader in render/Scenery.ts carries a copy of
+ * this curve; the two must agree.
+ */
+export function coastZ(x: number): number {
+  return -76 - 7 * Math.sin(x / 38) - 3 * Math.sin(x / 11 + 1.3) - 2 * Math.sin(x / 5.5);
+}
+
+/** The beach runs this far inland from the water's edge. */
+export const BEACH_DEPTH = 13;
+
 /** Height of the ground at a point. */
 export function groundHeight(x: number, z: number): number {
   return baseHeight(z) + rolling(x, z);

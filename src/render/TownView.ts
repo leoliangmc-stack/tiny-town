@@ -33,6 +33,7 @@ import type { Building, HouseStyle } from '../entities/Building.js';
 import { buildRoadGraph, KERB_INSET, kerbSpaceHeading } from '../simulation/Navigation.js';
 import { Rng } from '../simulation/Rng.js';
 import type { World } from '../simulation/World.js';
+import { TOWN_EXIT } from '../world/Countryside.js';
 import { countryside, groundHeight, groundTiltX } from '../world/Terrain.js';
 import {
   BUILDINGS,
@@ -549,9 +550,7 @@ export class TownView {
       // Where a crossing street's tarmac cuts this pavement.
       const cuts = crossings.filter((along) => {
         const junction = alongX ? { x: along, z: street.at } : { x: street.at, z: along };
-        return alongX
-          ? this.streetContinues(junction, 0, side)
-          : this.streetContinues(junction, side, 0);
+        return alongX ? this.roadLeaves(junction, 0, side) : this.roadLeaves(junction, side, 0);
       });
       // The ends: past the last junction on this side, if it is not a cut,
       // the pavement runs on to wrap the corner.
@@ -602,7 +601,7 @@ export class TownView {
     for (const junction of junctions()) {
       for (const sx of [-1, 1] as const) {
         for (const sz of [-1, 1] as const) {
-          if (!this.streetContinues(junction, sx, 0) || !this.streetContinues(junction, 0, sz)) {
+          if (!this.roadLeaves(junction, sx, 0) || !this.roadLeaves(junction, 0, sz)) {
             continue;
           }
           const x = junction.x + sx * (half + kerbWidth / 2);
@@ -673,6 +672,21 @@ export class TownView {
         }
       }
     }
+  }
+
+  /**
+   * Whether any road leaves the junction in the given direction: a town
+   * street, or the country road out of town (SPEC.md 2.14, decision 44). The
+   * pavements are cut for either; zebra crossings are painted only across
+   * town streets, since the country road has no pavement to cross to.
+   */
+  private roadLeaves(junction: { x: number; z: number }, dx: number, dz: number): boolean {
+    const exit =
+      junction.x === TOWN_EXIT.x &&
+      junction.z === TOWN_EXIT.z &&
+      dx === TOWN_EXIT.dx &&
+      dz === TOWN_EXIT.dz;
+    return exit || this.streetContinues(junction, dx, dz);
   }
 
   /** Whether a street actually leaves the junction in the given direction. */

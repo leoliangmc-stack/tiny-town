@@ -20,7 +20,8 @@ import {
 } from 'three';
 
 import { Rng } from '../simulation/Rng.js';
-import { countryside, groundHeight } from '../world/Terrain.js';
+import { distanceToCountryRoads, NEIGHBOURS } from '../world/Countryside.js';
+import { BEACH_DEPTH, coastZ, countryside, groundHeight } from '../world/Terrain.js';
 import { townBounds } from '../world/Town.js';
 
 import type { EnvironmentState } from './Environment.js';
@@ -35,13 +36,8 @@ import type { EnvironmentState } from './Environment.js';
  * the simulation.
  */
 
-/** Where the shore lies: a gentle bay north of the town, z growing more negative seawards. */
-export function coastZ(x: number): number {
-  return -76 - 7 * Math.sin(x / 38) - 3 * Math.sin(x / 11 + 1.3) - 2 * Math.sin(x / 5.5);
-}
-
-/** The beach runs this far inland from the water's edge. */
-const BEACH_DEPTH = 13;
+/** No forest tree stands closer than this to the middle of a country road. */
+export const ROAD_CLEARING = 7;
 
 /** How far out the sea and the land are drawn; the fog hides the ends. */
 const WORLD_REACH = 700;
@@ -82,7 +78,7 @@ const SEA_FRAGMENT_SHADER = /* glsl */ `
   uniform float time;
   varying vec3 vWorldPosition;
 
-  // The same curve as coastZ() below; the two must agree.
+  // The same curve as coastZ() in world/Terrain.ts; the two must agree.
   float coastZ(float x) {
     return -76.0 - 7.0 * sin(x / 38.0) - 3.0 * sin(x / 11.0 + 1.3) - 2.0 * sin(x / 5.5);
   }
@@ -334,7 +330,12 @@ export class Scenery {
         z < bounds.maxZ + margin;
       const inSea = z < coastZ(x) + BEACH_DEPTH + 6;
       const farOut = Math.hypot(x, z) > 370;
-      if (insideTown || inSea || farOut) {
+      // The woods make way for the country road and the neighbouring villages.
+      const onRoad = distanceToCountryRoads({ x, z }) < ROAD_CLEARING;
+      const inVillage = NEIGHBOURS.some(
+        (village) => Math.hypot(x - village.centre.x, z - village.centre.z) < village.radius + 6,
+      );
+      if (insideTown || inSea || farOut || onRoad || inVillage) {
         continue;
       }
       // Woods begin where the meadows do, and grow in stands with open

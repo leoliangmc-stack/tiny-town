@@ -1,5 +1,37 @@
 # Changelog
 
+## Phase 8.2 — A world beyond the town
+
+SPEC 2.14 and decision 44, at the author's request: the town felt small because the world
+ended at the edge of the frame. Everything here is render side, on real time.
+
+- `world/Countryside.ts` holds the layout as pure data: smooth paths (Catmull-Rom through
+  their control points), the country road, the three neighbours, the island's heightfield,
+  the breakwaters, and the voyages and car rounds as pure functions of time. `coastZ` and
+  `BEACH_DEPTH` moved from `render/Scenery.ts` to `world/Terrain.ts` so the data can use
+  them.
+- Neighbours (`render/Neighbours.ts`): a fishing village on the coast east of the town, a
+  hill village inland, and a village on an island across the bay, each a seeded cluster of
+  white and pale houses with a few blue domes and a bell tower. Windows light up with the
+  street lamps from 17:30 to 19:30; most go out between 22:00 and 01:30, about one in eight
+  stays lit until dawn, some early risers light up before six; all of them on Mid-Autumn
+  night. One `Points` draw with no fog, so the lights carry across the water.
+- The country road (`render/CountryRoad.ts`): a 5 m ribbon of tarmac draped over the
+  ground, from the east end of the north lane along the coast to the fishing village, with
+  a fork up to the hill village. The town cuts its pavements where the road leaves; the
+  forest keeps 7 m off it and out of the villages. Four cars drive between the villages
+  past the fork, keep right, rest out of sight at each end, and never enter the town; after
+  dark they show a warm glow ahead and a red one behind.
+- Boats: a coaster that leaves the fishing village's breakwater for the horizon, shrinks
+  into the haze, and comes back after a while; a passenger launch between that harbour and
+  the island, waiting at each quay. Moored boats turn slowly to face their way out and
+  leave no wake.
+- Tests: the road leaves the town at the north lane, stays above the beach, misses every
+  building and tree, and no forest tree stands on it; the cars stay on their side of the
+  road and out of the town; the boats stay on the water, clear of the breakwaters and the
+  island, and the coaster vanishes; every village house stands on land within its village;
+  the windows light, thin out late, and all light on Mid-Autumn night.
+
 ## Phase 8.1 — Weather sounds and a Mid-Autumn soundtrack
 
 SPEC 2.12 and decision 43, at the author's request: Sunny and Cloudy sounded the same, and

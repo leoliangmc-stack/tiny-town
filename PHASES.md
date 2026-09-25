@@ -428,6 +428,39 @@ its own (SPEC 2.12, decision 43).
 - Every launch and burst the fireworks make reaches the ambience.
 - Tests, build and lint green; determinism untouched (render side only).
 
+## Phase 8.2 — A world beyond the town
+
+**Goal.** The town should feel like one place among others, not a model on a table: the
+author found it small because the whole world ends at the edge of the frame (SPEC 2.14,
+decision 44).
+
+**Scope.**
+
+- Neighbours: a fishing village on the coast to the east with a small breakwater, a hill
+  village inland to the east, and a village on an island across the bay. Clusters of white
+  houses, a few blue domes, a bell tower each. By night scattered windows light up; most go
+  out late, a few stay on until dawn; all of them on Mid-Autumn night.
+- A country road without pavements leaves the town at the east end of the north lane,
+  runs east along the coast to the fishing village, and forks uphill to the hill village.
+  It follows the ground; the forest keeps off it.
+- Through traffic: a few cars drive between the two villages past the fork, never into the
+  town, with headlights after dark. They appear and vanish inside the villages.
+- Boats that come and go: a coaster leaves the fishing village's breakwater for the
+  horizon and later comes back out of the haze; a small passenger boat plies between the
+  island and the fishing village, waiting at each quay.
+- All render side, on real time, at every speed; no change to the simulation, the
+  navigation graphs or the state hash.
+
+**Acceptance.**
+
+- The default view shows at least one neighbour in landscape and in portrait, and after
+  dark their lights and moving headlights read in the distance.
+- The road meets the town's corner cleanly: the pavements are cut, no kerb crosses it.
+- Unit tests: the road stays on land and clear of the town's buildings, no forest tree
+  stands on it, every neighbour house is on land, and the cars and boats stay on their
+  road and water.
+- Tests, build and lint green; the 1x/100x determinism test untouched.
+
 ## v1.1 backlog
 
 - Consider Blender-generated building set as a drop-in replacement for the procedural one; simulation layer unchanged. Not scheduled: it needs an external asset pipeline, which SPEC 4.2 still rules out.

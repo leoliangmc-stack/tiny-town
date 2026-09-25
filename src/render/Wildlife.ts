@@ -14,7 +14,7 @@ import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeom
 
 import type { Point } from '../entities/geometry.js';
 import { Rng } from '../simulation/Rng.js';
-import { countryside, groundHeight } from '../world/Terrain.js';
+import { coastZ, countryside, groundHeight } from '../world/Terrain.js';
 import {
   BUILDINGS,
   LANE_WIDTH,
@@ -26,7 +26,6 @@ import {
 } from '../world/Town.js';
 
 import type { EnvironmentState } from './Environment.js';
-import { coastZ } from './Scenery.js';
 
 /**
  * Small life outside the town and in the air (SPEC.md 2.14, DESIGN.md §21):

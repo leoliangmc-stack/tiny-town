@@ -23,6 +23,7 @@ import { townBounds } from '../world/Town.js';
 
 import { Ambience, type FireworkCue } from './Ambience.js';
 import { Boats } from './Boats.js';
+import { CountryRoad } from './CountryRoad.js';
 import { CitizenView } from './CitizenView.js';
 import { DebugView } from './DebugView.js';
 import { Dragons } from './Dragons.js';
@@ -33,6 +34,7 @@ import { MoonPalace } from './MoonPalace.js';
 import { Rain } from './Rain.js';
 import { Rainbow, type RainbowMode } from './Rainbow.js';
 import { SUNRISE_MINUTE, SUNSET_MINUTE } from './palettes.js';
+import { Neighbours } from './Neighbours.js';
 import { Scenery } from './Scenery.js';
 import { Smoke } from './Smoke.js';
 import { TownView } from './TownView.js';
@@ -203,6 +205,8 @@ export class App {
   private readonly townView = new TownView();
   private readonly wildlife = new Wildlife();
   private readonly boats = new Boats();
+  private readonly neighbours = new Neighbours();
+  private readonly countryRoad = new CountryRoad();
   private readonly trafficLights = new TrafficLights();
   private readonly smoke: Smoke;
   private readonly rainbow = new Rainbow();
@@ -279,6 +283,8 @@ export class App {
     this.scene.add(this.townView.root);
     this.scene.add(this.wildlife.root);
     this.scene.add(this.boats.root);
+    this.scene.add(this.neighbours.root);
+    this.scene.add(this.countryRoad.root);
     this.scene.add(this.trafficLights.root);
     this.smoke = new Smoke(this.townView.chimneys);
     this.scene.add(this.smoke.mesh);
@@ -707,6 +713,9 @@ export class App {
     this.wildlife.update(deltaSeconds, this.scheduler.getSpeed(), this.environment.state);
     // Boats sail on real time like the clouds, at every speed (SPEC.md 2.14).
     this.boats.update(this.environment.state, this.clock.elapsedTime, this.camera);
+    // The world beyond the town lives on real time too, and on the shown hour (decision 44).
+    this.neighbours.update(this.environment.state, this.shownMinute(), this.festival.isActive);
+    this.countryRoad.update(this.environment.state, this.clock.elapsedTime, this.camera);
     this.trafficLights.update(this.world, this.camera, this.environment.state.lampFactor);
     this.smoke.update(this.world, this.environment.state, deltaSeconds);
     this.festival.update(deltaSeconds, this.camera);
@@ -1097,6 +1106,8 @@ export class App {
     this.debugView?.dispose();
     this.ambience.dispose();
     this.boats.dispose();
+    this.neighbours.dispose();
+    this.countryRoad.dispose();
     this.smoke.dispose();
     this.rainbow.dispose();
     this.festival.dispose();

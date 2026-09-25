@@ -290,6 +290,13 @@ The town sits in a place, not on a green table (SPEC 2.14).
 - **Distance.** Green hills and woodland around the town, grey mountains beyond, all
   fading into the sky colour with distance. Enough to fill the horizon, never enough to
   compete with the town.
+- **A world beyond the town** (SPEC 2.14, decision 44). The town is one place among
+  others. Neighbouring villages, a road out, boats that leave and come back: each hints at
+  somewhere past the frame. Neighbours are read, not studied: by day a scatter of white
+  cubes in the haze, by night a handful of warm pinpricks, fewer as the night goes on.
+  They are always fainter and smaller than anything in the town; a neighbour that pulls
+  the eye away from the town is too big or too bright. The country road is plain tarmac
+  with no kerbs or lines, narrower than a town street, draped over the rolling ground.
 - **The floor under the spectacle.** By day the town and its windows are the subject and
   clouds and sea are kept quiet. By night the sky may be spectacular, but the windows,
   street lamps and car lights must still be the brightest, warmest things in the picture.

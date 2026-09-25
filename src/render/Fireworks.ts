@@ -9,10 +9,8 @@ import {
 } from 'three';
 
 import { Rng } from '../simulation/Rng.js';
-import { groundHeight } from '../world/Terrain.js';
+import { coastZ, groundHeight } from '../world/Terrain.js';
 import { BUILDINGS, PARK, SQUARE } from '../world/Town.js';
-
-import { coastZ } from './Scenery.js';
 
 /**
  * The fireworks of Mid-Autumn night (SPEC.md 2.15, decisions 37 and 39): a
